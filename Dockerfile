@@ -18,6 +18,7 @@ RUN apt-get update \
 
 COPY --from=builder /out/edgebot /usr/local/bin/edgebot
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY scripts/litertlm-libs.sh /usr/local/share/edgebot/litertlm-libs.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 WORKDIR /workspace
