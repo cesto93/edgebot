@@ -43,6 +43,12 @@ main() {
   # 1b. Fail fast when a required lib is still unusable (diagnostics inside).
   litertlm_check_required "$LIB_DIR" || exit 1
 
+  # 1c. Fail fast when required libs have unresolvable system dependencies
+  # (e.g. libvulkan.so.1 from libvulkan1, missing on slim images): without
+  # this the bot would start and fail every LLM call at runtime with a
+  # cryptic dlopen error.
+  litertlm_check_system_deps "$LIB_DIR" || exit 1
+
   # 2. Modello .litertlm: download solo se assente (un fallimento non deve
   # impedire di forzare la config di default al passo 3).
   if [ ! -f "$MODEL_DIR/$MODEL_FILE" ]; then

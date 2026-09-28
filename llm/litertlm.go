@@ -252,6 +252,13 @@ func (l *LitertLMCaller) client(ctx context.Context) (*litertlm.Client, error) {
 		litertlm.WithBackend(backend),
 	)
 	if err != nil {
+		// The runtime links the Vulkan loader even for the cpu backend,
+		// so a minimal image without libvulkan1 surfaces as a cryptic
+		// dlopen error (seen on arm64 docker: "libvulkan.so.1: cannot
+		// open shared object file"). Point at the fix instead.
+		if strings.Contains(err.Error(), "libvulkan.so") {
+			return nil, fmt.Errorf("%w (missing system Vulkan loader: install libvulkan1 / rebuild the docker image)", err)
+		}
 		return nil, err
 	}
 	litertlmClientMu.Lock()

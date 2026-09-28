@@ -16,7 +16,7 @@
 #                       override with a small value when testing with stubs)
 #
 # Provides: litertlm_lib_ok, litertlm_download, litertlm_install_main_lib,
-# litertlm_ensure_libs, litertlm_check_required.
+# litertlm_ensure_libs, litertlm_check_required, litertlm_check_system_deps.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "error: scripts/litertlm-libs.sh is a library, source it instead of executing it" >&2
   exit 1
@@ -133,6 +133,28 @@ litertlm_ensure_libs() {
   for lib in $AUX_LIBS; do
     if ! litertlm_lib_ok "$1/$lib"; then
       litertlm_download "$LITERTLM_PREBUILT/$lib" "$1/$lib" || return 1
+    fi
+  done
+}
+
+# litertlm_check_system_deps <libdir>: fail fast when a required lib has
+# unresolvable system dependencies. The LiteRT-LM runtime links against
+# the Vulkan loader (libvulkan.so.1, Debian package libvulkan1) even for
+# the cpu backend, and debian:bookworm-slim does not ship it: without
+# this check the container starts and every LLM call fails at dlopen
+# with "libvulkan.so.1: cannot open shared object file". Only REQUIRED_LIBS
+# are checked (optional GPU plugins may carry extra deps but their dlopen
+# failure is non-fatal). Skipped silently when `ldd` is unavailable.
+litertlm_check_system_deps() {
+  command -v ldd >/dev/null 2>&1 || return 0
+  # shellcheck disable=SC2086
+  for lib in $REQUIRED_LIBS; do
+    missing="$(ldd "$1/$lib" 2>/dev/null | grep 'not found' || true)"
+    if [ -n "$missing" ]; then
+      echo "error: $1/$lib has missing system dependencies:" >&2
+      echo "$missing" >&2
+      echo "hint: install the Vulkan loader (Debian/Ubuntu: apt-get install libvulkan1) and restart; docker images need a rebuild to pick up the Dockerfile fix" >&2
+      return 1
     fi
   done
 }

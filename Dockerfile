@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/edgebot .
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates bash git curl unzip \
+    && apt-get install -y --no-install-recommends ca-certificates bash git curl unzip libvulkan1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /out/edgebot /usr/local/bin/edgebot
