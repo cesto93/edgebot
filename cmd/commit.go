@@ -198,15 +198,46 @@ var fenceRe = regexp.MustCompile("(?m)^```[a-zA-Z]*\\s*\\n?|\\n?```\\s*$")
 // not leak into the commit message.
 var thinkRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
 
+// gemmaChannelRe matches a Gemma 4 thinking channel block
+// (<|channel>thought\n...<channel|>), which Gemma models hosted on the
+// Gemini API can leave in the output. The answer follows the closing tag.
+// The trailing/leading pipes are optional to tolerate variant spellings.
+var gemmaChannelRe = regexp.MustCompile(`(?s)<\|channel\|?>.*?\|?<channel\|>`)
+
+// gemmaSentinelRe matches leftover Gemma/chat-template sentinel tokens that
+// must never appear in a commit message (prompt markers, turn markers,
+// sequence markers).
+var gemmaSentinelRe = regexp.MustCompile(`<\|think\|?>|<\|channel\|?>|\|?<channel\|>|<\|turn\|?>\w*|\|?<turn\|>|<bos>|<eos>`)
+
 // stripThinkBlock removes <think>...</think> sections (and a dangling
 // unclosed tag with everything after it, e.g. when generation was capped
-// mid-thought) from model output.
+// mid-thought) from model output. It also removes Gemma thinking channel
+// blocks (<|channel>...<channel|>) plus leftover sentinel tokens, so Gemma
+// models on the Gemini API don't leak their thought process into the
+// commit message.
 func stripThinkBlock(s string) string {
 	s = thinkRe.ReplaceAllString(s, "")
+	s = gemmaChannelRe.ReplaceAllString(s, "")
 	if i := strings.Index(s, "<think>"); i >= 0 {
 		s = s[:i]
 	}
+	// A Gemma channel start without a closing tag means generation was
+	// capped mid-thought (or a ghost channel with no answer yet): drop it
+	// and everything after it, mirroring the unclosed <think> handling.
+	// Only cut when no closing tag remains (closed blocks were removed
+	// above); a start tag after the answer with no close is trailing noise.
+	if !strings.Contains(s, "<channel|>") {
+		if i := strings.Index(s, "<|channel>"); i >= 0 {
+			s = s[:i]
+		}
+	}
 	s = strings.ReplaceAll(s, "</think>", "")
+	s = gemmaSentinelRe.ReplaceAllString(s, "")
+	// Some Gemma outputs carry a bare "thought" channel label even without
+	// thinking delimiters; strip it when it prefixes the whole output.
+	if strings.HasPrefix(s, "thought\n") {
+		s = strings.TrimPrefix(s, "thought\n")
+	}
 	return strings.TrimSpace(s)
 }
 

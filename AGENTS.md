@@ -90,7 +90,7 @@ Persistent `--debug` flag on the root command. `cmd.initLogger(cfg)` temporarily
 - Usable as `edgebot commit` or via `go run . commit`
 - `-A` / `--all` stages all changes; `-d` / `--dry-run` prints without committing (and unstages if used with `-A`)
 - Sends `git log --oneline -5` + `git diff --cached` as context; uses `llm.NewProviderCaller` with `llm.NoopExecutor` (no tools)
-- Diff truncated to `commitMaxDiffChars` runes (marked) so prompts fit small local contexts; `<think>` sections stripped via `stripThinkBlock` (also drops dangling unclosed tags); llamacpp capped to `commitMaxTokens` with `NoThink` set
+- Diff truncated to `commitMaxDiffChars` runes (marked) so prompts fit small local contexts; `<think>` sections stripped via `stripThinkBlock` (also drops dangling unclosed tags); Gemma thinking channel blocks (`<|channel>...<channel|>`, dangling starts, bare `thought` labels, `<|think|>`/`<|turn>`/`<bos>`/`<eos>` sentinels) stripped too since Gemma-on-Gemini-API leaks thoughts into the message; llamacpp capped to `commitMaxTokens` with `NoThink` set
 - Strips markdown code fences, writes to a temp file, runs `git commit -F <file>`
 
 ## Extract command (cmd/extract.go)

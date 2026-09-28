@@ -63,6 +63,36 @@ func TestStripThinkBlock(t *testing.T) {
 			"fix: preamble",
 		},
 		{
+			"gemma channel block",
+			"<|channel>thought\nreasoning here\n<channel|>fix: something",
+			"fix: something",
+		},
+		{
+			"gemma channel block multiline",
+			"<|channel>thought\nline1\nline2\n<channel|>\n\nfix: something\n\nwith body",
+			"fix: something\n\nwith body",
+		},
+		{
+			"gemma unclosed channel drops the thought",
+			"fix: preamble\n<|channel>thought\nendless reasoning without end",
+			"fix: preamble",
+		},
+		{
+			"gemma unclosed channel at start drops everything",
+			"<|channel>thought\nfix: something",
+			"",
+		},
+		{
+			"gemma sentinel tokens",
+			"<|turn>user\nprompt<turn|>\n<|turn>model\nfix: something<turn|><eos>",
+			"prompt\n\nfix: something",
+		},
+		{
+			"gemma bare thought label",
+			"thought\nfix: something",
+			"fix: something",
+		},
+		{
 			"empty",
 			"",
 			"",
