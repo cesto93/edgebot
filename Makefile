@@ -25,7 +25,7 @@ install-yzma:
 	@echo "  Set YZMA_LIB=$(EDGEBOT_LIB) in your shell rc file if needed."
 install-litertlm:
 	mkdir -p $(EDGEBOT_LIB)
-	@if [ ! -f "$(EDGEBOT_LIB)/liblitertlm_c_cpu.so" ]; then \
+	@if [ ! -s "$(EDGEBOT_LIB)/liblitertlm_c_cpu.so" ]; then \
 		echo "Downloading liblitert-lm.so from $(LITERTLM_RELEASE_URL) ..."; \
 		tmp=$$(mktemp -d); \
 		curl -fsSL "$(LITERTLM_RELEASE_URL)" -o "$$tmp/litert_lm_c_api.zip" || { echo "✗ failed to download LiteRT-LM release $(LITERTLM_VERSION)"; exit 1; }; \
@@ -34,7 +34,7 @@ install-litertlm:
 		rm -rf "$$tmp"; \
 	fi
 	@for lib in $(LITERTLM_AUX_LIBS); do \
-		if [ ! -f "$(EDGEBOT_LIB)/$$lib" ]; then \
+		if [ ! -s "$(EDGEBOT_LIB)/$$lib" ]; then \
 			echo "Downloading $$lib ..."; \
 			curl -fsSL "$(LITERTLM_PREBUILT)/$$lib" -o "$(EDGEBOT_LIB)/$$lib" || { echo "✗ failed to download $$lib"; exit 1; }; \
 		fi; \

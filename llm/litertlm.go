@@ -219,6 +219,21 @@ func (l *LitertLMCaller) client(ctx context.Context) (*litertlm.Client, error) {
 		backend = litertlmDefaultBackend
 	}
 
+	// Pre-flight check so a missing runtime produces an actionable error
+	// instead of a cryptic dlopen failure (e.g. a stale ~/.edgebot/lib
+	// from an interrupted download inside docker).
+	mainLib := "liblitertlm_c_cpu.so"
+	if backend == "gpu" {
+		mainLib = "liblitertlm_c.so"
+	}
+	for _, name := range []string{mainLib, "libGemmaModelConstraintProvider.so"} {
+		p := filepath.Join(libDir, name)
+		st, err := os.Stat(p)
+		if err != nil || st.Size() == 0 {
+			return nil, fmt.Errorf("required library %s is missing or empty: run `make install-litertlm` (or restart the container so docker-entrypoint.sh re-downloads it)", p)
+		}
+	}
+
 	key := libDir + "\x00" + modelPath + "\x00" + backend
 
 	litertlmClientMu.Lock()
