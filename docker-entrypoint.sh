@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Edgebot docker entrypoint: assicura backend litertlm pronto all'uso.
 # - installa le shared lib LiteRT-LM in ~/.edgebot/lib se mancanti,
-#   vuote o corrotte (stessa logica del target `make install-litertlm`):
-#   ogni file scaricato e' verificato (non vuoto, dimensione minima,
-#   magic ELF) prima di sostituire quello esistente
+#   vuote, corrotte o per l'arch sbagliata (stessa logica del target
+#   `make install-litertlm`): la platform (linux_x86_64/linux_arm64) segue
+#   `uname -m`, ogni file scaricato e' verificato (non vuoto, dimensione
+#   minima, magic ELF, e_machine) prima di sostituire quello esistente
 # - scarica il modello .litertlm da HuggingFace se mancante
 #   (via `edgebot models pull`, che aggiorna anche la config)
 #   (un fallimento non deve impedire di forzare la config al passo 3)
@@ -22,7 +23,33 @@ BACKEND="${LITERTLM_BACKEND:-cpu}"
 
 LITERTLM_TAG="${LITERTLM_TAG:-main}"
 LITERTLM_VERSION="${LITERTLM_VERSION:-v0.16.0}"
-LITERTLM_PREBUILT="${LITERTLM_PREBUILT:-https://github.com/google-ai-edge/LiteRT-LM/raw/${LITERTLM_TAG}/prebuilt/linux_x86_64}"
+# LiteRT-LM ships separate linux builds per CPU arch. Pick the one matching
+# the host: downloading the wrong arch yields a misleading dlopen
+# "No such file or directory" at runtime even though the file exists and
+# is non-empty (glibc reports EM mismatch as ENOENT). Overridable for
+# testing or exotic setups (e.g. emulated containers).
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64|amd64) LITERTLM_PLAT_DEFAULT="linux_x86_64" ;;
+  aarch64|arm64) LITERTLM_PLAT_DEFAULT="linux_arm64" ;;
+  *)
+    echo "error: unsupported architecture $ARCH for litertlm (expected x86_64 or aarch64)" >&2
+    exit 1
+    ;;
+esac
+LITERTLM_PLAT="${LITERTLM_PLAT:-$LITERTLM_PLAT_DEFAULT}"
+# Expected ELF e_machine for the selected platform (bytes at offset 18):
+# x86-64 = 62 (0x3E), AArch64 = 183 (0xB7). lib_ok rejects .so files built
+# for the other arch so stale volume contents are re-downloaded.
+case "$LITERTLM_PLAT" in
+  linux_x86_64) EXPECT_MACHINE="3e00" ;;
+  linux_arm64) EXPECT_MACHINE="b700" ;;
+  *)
+    echo "error: unsupported LITERTLM_PLAT $LITERTLM_PLAT (expected linux_x86_64 or linux_arm64)" >&2
+    exit 1
+    ;;
+esac
+LITERTLM_PREBUILT="${LITERTLM_PREBUILT:-https://github.com/google-ai-edge/LiteRT-LM/raw/${LITERTLM_TAG}/prebuilt/${LITERTLM_PLAT}}"
 LITERTLM_RELEASE_URL="${LITERTLM_RELEASE_URL:-https://github.com/google-ai-edge/LiteRT-LM/releases/download/${LITERTLM_VERSION}/litert_lm_c_api-0.1.0.zip}"
 # shellcheck disable=SC2209
 AUX_LIBS="libGemmaModelConstraintProvider.so libLiteRt.so libLiteRtWebGpuAccelerator.so libLiteRtTopKWebGpuSampler.so"
@@ -37,13 +64,15 @@ REQUIRED_LIBS="$MAIN_LIB libGemmaModelConstraintProvider.so"
 MIN_LIB_BYTES="${MIN_LIB_BYTES:-1048576}"
 
 # lib_ok <path>: true when the file is a plausible ELF shared library
-# (exists, non-empty, >= MIN_LIB_BYTES, ELF magic). Existing empty or
-# truncated files from interrupted downloads must be re-downloaded, so
-# callers use this instead of a plain `[ -f ]` test.
+# for the selected platform (exists, non-empty, >= MIN_LIB_BYTES, ELF
+# magic, e_machine matching LITERTLM_PLAT). Existing empty, truncated or
+# wrong-arch files from interrupted downloads or an arch-changed host must
+# be re-downloaded, so callers use this instead of a plain `[ -f ]` test.
 lib_ok() {
   [ -s "$1" ] || return 1
   [ "$(wc -c <"$1")" -ge "$MIN_LIB_BYTES" ] || return 1
   [ "$(head -c 4 "$1" | od -An -tx1 | tr -d ' \n')" = "7f454c46" ] || return 1
+  [ "$(dd if="$1" bs=1 skip=18 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "$EXPECT_MACHINE" ] || return 1
 }
 
 # download <url> <dest>: fetch url to dest atomically, verifying the
@@ -66,15 +95,15 @@ download() {
 }
 
 install_main_lib() {
-  echo "Downloading LiteRT-LM runtime from $LITERTLM_RELEASE_URL ..."
+  echo "Downloading LiteRT-LM runtime ($LITERTLM_PLAT) from $LITERTLM_RELEASE_URL ..."
   tmp="$(mktemp -d)"
   if ! curl -fsSL "$LITERTLM_RELEASE_URL" -o "$tmp/litert_lm_c_api.zip"; then
     echo "error: failed to download $LITERTLM_RELEASE_URL" >&2
     rm -rf "$tmp"
     return 1
   fi
-  if ! unzip -jo "$tmp/litert_lm_c_api.zip" "lib/linux_x86_64/liblitert-lm.so" -d "$LIB_DIR"; then
-    echo "error: failed to extract liblitert-lm.so from the release archive" >&2
+  if ! unzip -jo "$tmp/litert_lm_c_api.zip" "lib/${LITERTLM_PLAT}/liblitert-lm.so" -d "$LIB_DIR"; then
+    echo "error: failed to extract lib/${LITERTLM_PLAT}/liblitert-lm.so from the release archive" >&2
     rm -rf "$tmp"
     return 1
   fi
