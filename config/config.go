@@ -203,6 +203,8 @@ func LoadConfig() (*Config, error) {
 				}
 			}
 
+			applyEnvOverrides(defaultConfig)
+
 			return defaultConfig, nil
 		}
 		return nil, fmt.Errorf("error reading config file: %w", err)
@@ -213,6 +215,8 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	config.ConfigFile = v.ConfigFileUsed()
+
+	applyEnvOverrides(&config)
 
 	if config.Tools == nil {
 		clone := make(map[string]bool, len(defaultTools))
@@ -235,6 +239,33 @@ func LoadConfig() (*Config, error) {
 
 // normalizeThinkEffort lowercases/trims llm.think_effort; unknown values are
 // reset to "" (provider default) with a warning so old configs keep loading.
+// applyEnvOverrides lets explicit environment variables override the loaded
+// configuration (built-in defaults or config file), so containers can select
+// the provider/model without editing config.yaml:
+//
+//	LLM_PROVIDER     overrides llm.provider
+//	LLM_MODEL        overrides llm.model (when LLM_PROVIDER is unset, the
+//	                 provider is auto-detected via LookupModelInfo, like
+//	                 `edgebot config --model` does)
+//	LITERTLM_BACKEND overrides litertlm.backend
+func applyEnvOverrides(cfg *Config) {
+	if v := strings.TrimSpace(os.Getenv("LITERTLM_BACKEND")); v != "" {
+		cfg.LitertLM.Backend = v
+	}
+	if v := strings.TrimSpace(os.Getenv("LLM_MODEL")); v != "" {
+		cfg.LLM.Model = v
+		if strings.TrimSpace(os.Getenv("LLM_PROVIDER")) == "" {
+			if info := LookupModelInfo(v); info != nil {
+				cfg.LLM.Provider = info.Provider
+				cfg.LLM.InputTypes = info.InputTypes
+			}
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("LLM_PROVIDER")); v != "" {
+		cfg.LLM.Provider = strings.ToLower(v)
+	}
+}
+
 func normalizeThinkEffort(s string) string {
 	v := strings.ToLower(strings.TrimSpace(s))
 	if v == "" {

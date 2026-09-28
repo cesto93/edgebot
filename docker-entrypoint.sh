@@ -43,10 +43,11 @@ for lib in $AUX_LIBS; do
   fi
 done
 
-# 2. Modello .litertlm: download solo se assente.
+# 2. Modello .litertlm: download solo se assente (un fallimento non deve
+# impedire di forzare la config di default al passo 3).
 if [ ! -f "$MODEL_DIR/$MODEL_FILE" ]; then
   echo "Downloading model $MODEL_REPO/$MODEL_FILE ..."
-  edgebot models pull "$MODEL_REPO" "$MODEL_FILE"
+  edgebot models pull "$MODEL_REPO" "$MODEL_FILE" || echo "warning: model download failed, continuing with default config" >&2
 else
   echo "Model already present: $MODEL_DIR/$MODEL_FILE"
 fi

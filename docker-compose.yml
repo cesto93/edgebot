@@ -14,17 +14,16 @@ services:
     env_file:
       - .env
     environment:
-      # LiteRT-LM in-process backend: provider litertlm con modello Gemma 4
-      # E2B. L'entrypoint scarica libs + modello se assenti e forza la
-      # config su questi valori all'avvio.
+      # Provider/model selection: explicit env overrides win over config.yaml
+      # (see LoadConfig/applyEnvOverrides). This compose stack runs the
+      # in-process litertlm provider with Gemma 4 E2B-IT by default.
+      - LLM_PROVIDER=litertlm
+      - LLM_MODEL=gemma-4-E2B-it
+      # The entrypoint downloads libs + model if missing and persists these
+      # values to the config on startup.
       - LITERTLM_BACKEND=cpu
       - LITERTLM_MODEL_REPO=litert-community/gemma-4-E2B-it-litert-lm
       - LITERTLM_MODEL_FILE=gemma-4-E2B-it.litertlm
-      # When Ollama runs on the host, point the container at host.docker.internal.
-      # Override with OLLAMA_HOST in your .env if needed.
-      - OLLAMA_HOST=http://host.docker.internal:11434
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
 volumes:
   edgebot-config:

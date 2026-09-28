@@ -149,6 +149,19 @@ shell:
   allowed_commands: "ls,pwd"
 ```
 
+The provider/model can also be selected without editing `config.yaml` via
+explicit environment variables (they override the file, e.g. from
+`docker-compose.yml`):
+
+```bash
+LLM_PROVIDER=litertlm
+LLM_MODEL=gemma-4-E2B-it
+LITERTLM_BACKEND=cpu
+```
+
+When only `LLM_MODEL` is set, the provider is auto-detected like
+`edgebot config --model` does.
+
 ### Configuration Options
 
 - **`llm.provider`**: The AI provider to use (`ollama`, `gemini`, `openrouter`, `litertlm` or `llamacpp`).

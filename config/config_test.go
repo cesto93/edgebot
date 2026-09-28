@@ -112,6 +112,119 @@ llm:
 	}
 }
 
+func TestLoadConfigEnvOverrides(t *testing.T) {
+	tmpDir := t.TempDir()
+	home := t.TempDir()
+
+	origConfigPaths := configPaths
+	defer func() { configPaths = origConfigPaths }()
+	configPaths = []string{tmpDir}
+
+	origUserConfigDirFunc := userConfigDirFunc
+	userConfigDirFunc = func() (string, error) { return tmpDir, nil }
+	defer func() { userConfigDirFunc = origUserConfigDirFunc }()
+
+	origHome := userHomeDirFunc
+	userHomeDirFunc = func() (string, error) { return home, nil }
+	defer func() { userHomeDirFunc = origHome }()
+
+	// Hermetic: no real .env files, no network model lookups.
+	origLoadEnv := loadEnvFunc
+	loadEnvFunc = func() error { return nil }
+	defer func() { loadEnvFunc = origLoadEnv }()
+
+	origOpenRouter := getOpenRouterModelsFunc
+	getOpenRouterModelsFunc = func() []ModelInfo { return nil }
+	defer func() { getOpenRouterModelsFunc = origOpenRouter }()
+
+	origAvailable := getAvailableModelsFunc
+	getAvailableModelsFunc = func() ([]ModelInfo, error) { return nil, nil }
+	defer func() { getAvailableModelsFunc = origAvailable }()
+
+	writeFileConfig := func(provider, model, backend string) {
+		content := "llm:\n  provider: \"" + provider + "\"\n  model: \"" +
+			model + "\"\nlitertlm:\n  backend: \"" + backend + "\"\n"
+		if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"),
+			[]byte(content), 0644); err != nil {
+			t.Fatalf("Failed to write config file: %v", err)
+		}
+	}
+
+	t.Run("provider and model override file", func(t *testing.T) {
+		writeFileConfig("ollama", "granite4:3b-h", "cpu")
+		t.Setenv("LLM_PROVIDER", "litertlm")
+		t.Setenv("LLM_MODEL", "gemma-4-E2B-it")
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
+		if cfg.LLM.Provider != "litertlm" {
+			t.Errorf("Provider = %q, want %q", cfg.LLM.Provider, "litertlm")
+		}
+		if cfg.LLM.Model != "gemma-4-E2B-it" {
+			t.Errorf("Model = %q, want %q", cfg.LLM.Model, "gemma-4-E2B-it")
+		}
+	})
+
+	t.Run("env applies without config file", func(t *testing.T) {
+		os.Remove(filepath.Join(tmpDir, "config.yaml"))
+		t.Setenv("LLM_PROVIDER", "litertlm")
+		t.Setenv("LLM_MODEL", "gemma-4-E2B-it")
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
+		if cfg.LLM.Provider != "litertlm" || cfg.LLM.Model != "gemma-4-E2B-it" {
+			t.Errorf("got %q/%q, want litertlm/gemma-4-E2B-it",
+				cfg.LLM.Provider, cfg.LLM.Model)
+		}
+	})
+
+	t.Run("no env keeps file values", func(t *testing.T) {
+		writeFileConfig("ollama", "granite4:3b-h", "cpu")
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
+		if cfg.LLM.Provider != "ollama" || cfg.LLM.Model != "granite4:3b-h" {
+			t.Errorf("got %q/%q, want ollama/granite4:3b-h",
+				cfg.LLM.Provider, cfg.LLM.Model)
+		}
+	})
+
+	t.Run("model only auto-detects litertlm from disk", func(t *testing.T) {
+		writeFileConfig("ollama", "granite4:3b-h", "cpu")
+		modelDir := filepath.Join(home, ".edgebot", "models", "litertlm")
+		if err := os.MkdirAll(modelDir, 0755); err != nil {
+			t.Fatalf("Failed to create models dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(modelDir, "gemma-4-E2B-it.litertlm"),
+			[]byte("model"), 0644); err != nil {
+			t.Fatalf("Failed to write model file: %v", err)
+		}
+		t.Setenv("LLM_MODEL", "gemma-4-E2B-it")
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
+		if cfg.LLM.Provider != "litertlm" {
+			t.Errorf("Provider = %q, want %q", cfg.LLM.Provider, "litertlm")
+		}
+	})
+
+	t.Run("backend override", func(t *testing.T) {
+		writeFileConfig("ollama", "granite4:3b-h", "cpu")
+		t.Setenv("LITERTLM_BACKEND", "gpu")
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
+		if cfg.LitertLM.Backend != "gpu" {
+			t.Errorf("Backend = %q, want %q", cfg.LitertLM.Backend, "gpu")
+		}
+	})
+}
+
 func TestThinkEffortNormalization(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"", ""},
