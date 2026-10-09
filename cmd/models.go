@@ -82,8 +82,8 @@ func runModels(cmd *cobra.Command) error {
 	})
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "\tMODEL\tPROVIDER\tSIZE\tINPUT TYPES")
-	fmt.Fprintln(w, "\t-----\t--------\t----\t-----------")
+	fmt.Fprintln(w, "\tMODEL\tPROVIDER\tTYPE\tSIZE\tINPUT TYPES")
+	fmt.Fprintln(w, "\t-----\t--------\t----\t----\t-----------")
 	for _, m := range models {
 		marker := ""
 		if m.Name == cfg.LLM.Model && m.Provider == cfg.LLM.Provider {
@@ -97,7 +97,7 @@ func runModels(cmd *cobra.Command) error {
 		if inputTypes == "" {
 			inputTypes = "-"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", marker, m.Name, m.Provider, size, inputTypes)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", marker, m.Name, m.Provider, m.ModelType(), size, inputTypes)
 	}
 	if err := w.Flush(); err != nil {
 		return fmt.Errorf("flush: %w", err)

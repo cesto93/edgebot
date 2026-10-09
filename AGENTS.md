@@ -106,7 +106,7 @@ Persistent `--debug` flag on the root command. `cmd.initLogger(cfg)` temporarily
 ## Models command (cmd/models.go, cmd/models_pull.go)
 
 - Usable as `edgebot models` or `edgebot models pull <repo> <model> [mmproj]`
-- Lists models in a table (Model, Provider, Size, Input Types); current model prefixed with `* `
+- Lists models in a table (Model, Provider, Type, Size, Input Types); current model prefixed with `* `. Type is `llm` except for llamacpp GGUFs carrying System One decision metadata (`<arch>.decision.type` key, detected by a header-only scan in `config/gguf.go`), which show as `decision`
 - `-s` / `--set <model>` sets the current model; `-d` / `--delete <model>` deletes a local GGUF/`.litertlm` file (also removes paired mmproj for llamacpp)
 - For llamacpp, Size from GGUF file info. Input types: gemini hardcoded; openrouter from API `input_modalities`; llamacpp `text, image` when an `mmproj-*` file matches; ollama/litertlm `-`
 - `pull` downloads from HuggingFace; `.litertlm` → `~/.edgebot/models/litertlm/`, else `.gguf` → `~/.edgebot/models/llamacpp/`

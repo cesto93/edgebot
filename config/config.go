@@ -454,6 +454,25 @@ type ModelInfo struct {
 	Size       string
 	ModifiedAt string
 	InputTypes []string
+	// Type is ModelTypeDecision for System One decision models and empty
+	// (meaning ModelTypeLLM) for everything else. Only llamacpp GGUFs are
+	// probed; use ModelType() for display.
+	Type string
+}
+
+// Model types shown by the models command.
+const (
+	ModelTypeLLM      = "llm"
+	ModelTypeDecision = "decision"
+)
+
+// ModelType returns the display type of the model: "decision" for System One
+// decision models, "llm" for everything else.
+func (m ModelInfo) ModelType() string {
+	if m.Type == ModelTypeDecision {
+		return ModelTypeDecision
+	}
+	return ModelTypeLLM
 }
 
 var GeminiModels = []ModelInfo{
@@ -470,7 +489,7 @@ func GetLitertLMModels() []ModelInfo {
 	if err != nil {
 		return nil
 	}
-	return scanModels(dir, "litertlm", ".litertlm")
+	return scanModels(dir, "litertlm", ".litertlm", false)
 }
 
 // GetLlamacppModels lists the GGUF models on disk (excluding vision projector
@@ -481,7 +500,7 @@ func GetLlamacppModels() []ModelInfo {
 	if err != nil {
 		return nil
 	}
-	all := scanModels(dir, "llamacpp", ".gguf")
+	all := scanModels(dir, "llamacpp", ".gguf", true)
 	visionKeys := map[string]bool{}
 	var models []ModelInfo
 	for _, m := range all {
@@ -544,7 +563,9 @@ func FindLlamacppMMProj() (string, error) {
 }
 
 // scanModels lists the files with the given extension in dir as ModelInfos.
-func scanModels(dir, provider, ext string) []ModelInfo {
+// When probeDecision is set, GGUF files are scanned for System One decision
+// metadata and marked ModelTypeDecision.
+func scanModels(dir, provider, ext string, probeDecision bool) []ModelInfo {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -568,11 +589,15 @@ func scanModels(dir, provider, ext string) []ModelInfo {
 		if err == nil {
 			size = FormatFileSize(info.Size())
 		}
-		models = append(models, ModelInfo{
+		m := ModelInfo{
 			Name:     modelName,
 			Provider: provider,
 			Size:     size,
-		})
+		}
+		if probeDecision && isDecisionModelFile(filepath.Join(dir, name)) {
+			m.Type = ModelTypeDecision
+		}
+		models = append(models, m)
 	}
 	return models
 }
