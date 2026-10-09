@@ -1,6 +1,7 @@
 SHELL := /bin/bash
 EDGEBOT_DIR := $(HOME)/.edgebot
 EDGEBOT_LIB := $(EDGEBOT_DIR)/lib
+YZMA_VERSION ?= v1.29.1
 LITERTLM_TAG ?= main
 LITERTLM_VERSION ?= v0.16.0
 # LITERTLM_PLAT (linux_x86_64 | linux_arm64) defaults to the host arch inside
@@ -18,7 +19,7 @@ proto:
 	  service/proto/service.proto
 	@echo "Regenerated service/proto/*.pb.go (commit the generated files; protoc is only needed for regeneration)"
 install-yzma:
-	go install github.com/hybridgroup/yzma@v1.27.0
+	go install github.com/hybridgroup/yzma@$(YZMA_VERSION)
 	mkdir -p $(EDGEBOT_LIB)
 	yzma install --lib $(EDGEBOT_LIB) --upgrade
 	@echo ""
