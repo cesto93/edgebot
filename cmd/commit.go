@@ -13,7 +13,9 @@ import (
 	"edgebot/config"
 	"edgebot/llm"
 	"edgebot/service"
+	"edgebot/stats"
 
+	"github.com/hybridgroup/yzma/exp/decide"
 	"github.com/spf13/cobra"
 )
 
@@ -46,6 +48,15 @@ func commitCallLLM(cfg *config.Config, systemPrompt string, messages []llm.Messa
 
 var commitAll bool
 var dryRun bool
+var commitDecisionModel string
+var commitNoFilter bool
+
+// commitOpenDecider opens a System One decision model; swappable for tests.
+var commitOpenDecider = llm.OpenDecisionModel
+
+// commitMaxFileDiffChars caps the per-file diff used as decision-model state
+// so a single huge file doesn't blow the decision model's context.
+const commitMaxFileDiffChars = 2000
 
 // commitMaxTokens bounds commit-message generation on local models:
 // reasoning models otherwise spend minutes thinking out loud.
@@ -76,6 +87,8 @@ var commitCmd = &cobra.Command{
 func init() {
 	commitCmd.Flags().BoolVarP(&commitAll, "all", "A", false, "stage all changes before committing")
 	commitCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "print the commit message without creating a commit")
+	commitCmd.Flags().StringVar(&commitDecisionModel, "decision-model", "", "decision model for pre-filtering files (default: the configured decision model)")
+	commitCmd.Flags().BoolVar(&commitNoFilter, "no-filter", false, "skip decision-model pre-filtering and send the full diff to the LLM")
 }
 
 func runCommit() (rErr error) {
@@ -113,6 +126,14 @@ func runCommit() (rErr error) {
 	// diffs so the prompt fits instead of failing. Cloud providers ignore the
 	// marker and just see a shorter diff.
 	diff := truncateDiff(strings.TrimSpace(string(diffOutput)), commitMaxDiffChars)
+
+	// When a decision model is available, ask it (noul: include/exclude) per
+	// staged file whether that file's changes should be given to the LLM for
+	// commit-message generation. Generated files, lockfiles and other noise
+	// are filtered out so the message describes the meaningful change.
+	if filtered, ok := filterDiffWithDecisionModel(cfg, diff); ok {
+		diff = filtered
+	}
 
 	systemPrompt := "You are a helpful assistant that writes concise git commit messages."
 	userPrompt := fmt.Sprintf(`Generate a concise git commit message for the following staged changes.
@@ -193,6 +214,182 @@ Only output the commit message, nothing else.`,
 }
 
 var fenceRe = regexp.MustCompile("(?m)^```[a-zA-Z]*\\s*\\n?|\\n?```\\s*$")
+
+// resolveCommitDecisionModel picks the decision model used to pre-filter
+// staged files: --decision-model wins, then the configured decision default,
+// then (for configs predating the decision default) the chat model when it
+// points at a decision GGUF. Empty means no decision model is available.
+func resolveCommitDecisionModel(cfg *config.Config) string {
+	if strings.TrimSpace(commitDecisionModel) != "" {
+		return strings.TrimSpace(commitDecisionModel)
+	}
+	if strings.TrimSpace(cfg.LLM.DecisionModel) != "" {
+		return cfg.LLM.DecisionModel
+	}
+	if cfg.LLM.Provider == "llamacpp" && config.IsDecisionModel(cfg.LLM.Model) {
+		return cfg.LLM.Model
+	}
+	return ""
+}
+
+// filterDiffWithDecisionModel asks the decision model (noul per staged file)
+// whether that file should be given to the LLM, returning the diff rebuilt
+// from included files only. It returns ok=false when filtering is disabled,
+// no decision model is available, or filtering fails — callers then use the
+// full diff unchanged.
+func filterDiffWithDecisionModel(cfg *config.Config, fullDiff string) (filtered string, ok bool) {
+	if commitNoFilter {
+		return "", false
+	}
+	model := resolveCommitDecisionModel(cfg)
+	if model == "" {
+		return "", false
+	}
+
+	files := stagedFileList()
+	if len(files) == 0 {
+		return "", false
+	}
+	// A single staged file still goes through the decision model so pure
+	// noise commits (e.g. lockfile-only) can be reported, but the diff is
+	// never emptied — see the empty-filter fallback below.
+
+	modelDir, err := config.ModelsDir("llamacpp")
+	if err != nil {
+		slog.Warn("decision pre-filter skipped: cannot determine models dir", "err", err)
+		return "", false
+	}
+	modelPath, err := llm.ResolveDecisionModelPath(modelDir, model)
+	if err != nil {
+		slog.Warn("decision pre-filter skipped: model file not found", "model", model, "err", err)
+		return "", false
+	}
+	libDir, err := config.LibDir()
+	if err != nil {
+		slog.Warn("decision pre-filter skipped: cannot determine lib dir", "err", err)
+		return "", false
+	}
+
+	d, err := commitOpenDecider(libDir, modelPath, decide.Options{})
+	if err != nil {
+		slog.Warn("decision pre-filter skipped: cannot open decision model", "model", model, "err", err)
+		return "", false
+	}
+	defer d.Close()
+
+	var included, excluded []string
+	diffsByFile := make(map[string]string, len(files))
+	for _, f := range files {
+		fileDiff, err := stagedFileDiff(f)
+		if err != nil {
+			slog.Warn("decision pre-filter skipped: cannot read file diff", "file", f, "err", err)
+			return "", false
+		}
+		if strings.TrimSpace(fileDiff) == "" {
+			slog.Warn("decision pre-filter skipped: empty file diff", "file", f)
+			return "", false
+		}
+		diffsByFile[f] = fileDiff
+		keep, err := askIncludeFile(d, model, f, fileDiff)
+		if err != nil {
+			slog.Warn("decision pre-filter: question failed, keeping file", "file", f, "err", err)
+			included = append(included, f)
+			continue
+		}
+		if keep {
+			included = append(included, f)
+		} else {
+			excluded = append(excluded, f)
+		}
+	}
+
+	if len(excluded) == 0 {
+		return "", false
+	}
+	if len(included) == 0 {
+		slog.Warn("decision pre-filter excluded every file; using the full diff")
+		return "", false
+	}
+
+	fmt.Printf("Decision model %s: including %s", model, strings.Join(included, ", "))
+	if len(excluded) > 0 {
+		fmt.Printf(" (excluding %s)", strings.Join(excluded, ", "))
+	}
+	fmt.Println()
+
+	var b strings.Builder
+	for i, f := range included {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(strings.TrimSpace(diffsByFile[f]))
+		b.WriteString("\n")
+	}
+	rebuilt := strings.TrimSpace(b.String())
+	if rebuilt == "" {
+		slog.Warn("decision pre-filter produced an empty diff; using the full diff")
+		return "", false
+	}
+	return truncateDiff(rebuilt, commitMaxDiffChars), true
+}
+
+// stagedFileList returns the names of files with staged changes.
+func stagedFileList() []string {
+	out, err := execCommand("git", "diff", "--cached", "--name-only", "-z").Output()
+	if err != nil {
+		slog.Warn("decision pre-filter: cannot list staged files", "err", err)
+		return nil
+	}
+	// -z separates names with NUL so spaces/newlines in paths survive.
+	raw := strings.Split(string(out), "\x00")
+	var files []string
+	for _, f := range raw {
+		if strings.TrimSpace(f) != "" {
+			files = append(files, f)
+		}
+	}
+	return files
+}
+
+// stagedFileDiff returns the staged diff for a single file.
+func stagedFileDiff(file string) (string, error) {
+	out, err := execCommand("git", "diff", "--cached", "--", file).Output()
+	if err != nil {
+		return "", fmt.Errorf("git diff --cached -- %s failed: %w", file, err)
+	}
+	return string(out), nil
+}
+
+// askIncludeFile asks the decision model the noul question "should this file
+// be given to the LLM for generating the commit message?" for one staged
+// file. The state is the file name plus its (truncated) diff.
+func askIncludeFile(d *decide.Decider, model, file, fileDiff string) (bool, error) {
+	state := fmt.Sprintf("File: %s\n\nStaged diff:\n%s",
+		file, truncateDiff(strings.TrimSpace(fileDiff), commitMaxFileDiffChars))
+	q := decide.Noul(
+		"Should this file's changes be included when generating the git commit message? Include meaningful source, docs and config changes. Exclude generated files, lockfiles, build artifacts, vendored code and other noise unless they are the only meaningful change.",
+		"exclude the file from commit message generation",
+		"include the file in commit message generation",
+	)
+	resp, err := d.Answer(&decide.Request{
+		State:     llm.ParseDecisionState(state),
+		Questions: []decide.NamedQuestion{{ID: "include", Question: q}},
+	})
+	if err != nil {
+		return false, err
+	}
+	stats.RecordUsage("llamacpp", model, stats.Usage{
+		PromptTokens: resp.Usage.InputTokens,
+		TotalTokens:  resp.Usage.InputTokens,
+	})
+	if len(resp.Answers) == 0 || resp.Answers[0].Result == nil {
+		return false, fmt.Errorf("decide: empty answer")
+	}
+	r := resp.Answers[0].Result
+	slog.Debug("decision pre-filter", "file", file, "answer", r.Answer,
+		"p_true", r.Probability("true"))
+	return r.Answer == "true", nil
+}
 
 // thinkRe matches a reasoning model's <think>...</think> section, which must
 // not leak into the commit message.
