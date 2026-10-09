@@ -17,6 +17,7 @@ var configCmd = &cobra.Command{
 	Long:  `Show the current edgebot configuration, or modify it by passing flags to set specific config fields.`,
 	Example: `  edgebot config
   edgebot config --provider gemini --model gemini-2.0-flash
+  edgebot config --decision-model lev-1
   edgebot config --log-level debug
   edgebot config --agent plan
   edgebot config --agent-files=false
@@ -45,14 +46,32 @@ var configCmd = &cobra.Command{
 
 		if fl.Changed("model") {
 			v, _ := fl.GetString("model")
-			cfg.LLM.Model = v
-			if !fl.Changed("provider") {
-				if info := config.LookupModelInfo(v); info != nil {
-					cfg.LLM.Provider = info.Provider
-					cfg.LLM.InputTypes = info.InputTypes
+			if config.IsDecisionModel(v) {
+				cfg.LLM.DecisionModel = v
+				fmt.Printf("Note: %q is a decision model; set as the decision default (used by `edgebot decide`) instead of the chat model.\n", v)
+			} else {
+				cfg.LLM.Model = v
+				if !fl.Changed("provider") {
+					if info := config.LookupModelInfo(v); info != nil {
+						cfg.LLM.Provider = info.Provider
+						cfg.LLM.InputTypes = info.InputTypes
+					}
 				}
 			}
 			changed = true
+		}
+
+		if fl.Changed("decision-model") {
+			v, _ := fl.GetString("decision-model")
+			if err := config.SaveDecisionModel(v); err != nil {
+				return err
+			}
+			fmt.Printf("Decision model set to %s (used by `edgebot decide`)\n", v)
+			// Reload so a later save below does not clobber the change.
+			cfg, err = config.LoadConfig()
+			if err != nil {
+				return fmt.Errorf("failed to reload config: %w", err)
+			}
 		}
 
 		if fl.Changed("agent") {
@@ -167,6 +186,7 @@ var configCmd = &cobra.Command{
 func init() {
 	configCmd.Flags().String("provider", "", "Set LLM provider (ollama, gemini, openrouter, litertlm)")
 	configCmd.Flags().String("model", "", "Set LLM model name")
+	configCmd.Flags().String("decision-model", "", "Set default decision model for `edgebot decide` (local System One GGUF)")
 	configCmd.Flags().String("agent", "", "Set active agent (build, plan, chat)")
 	configCmd.Flags().Bool("agent-files", false, "Enable or disable AGENTS.md support")
 	configCmd.Flags().Bool("skills", false, "Enable or disable skills (~/.agents/skills, ./skills) support")

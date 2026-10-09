@@ -40,7 +40,7 @@ Docker: `Dockerfile` (multi-stage `golang:1.26-bookworm` → `debian:bookworm-sl
 2. `./.env` (local overrides)
 3. `config.yaml` from `./` or `~/.config/edgebot/`
 
-`.env.example` documents the recognized env vars. Defaults: provider=ollama, model=granite4:3b-h, log_level=info, confirm=true, allowed_commands=ls,pwd, agent=build, agent_files=true, skills=true, llm.think_effort="" (provider default). litertlm backend defaults to `cpu`. Explicit env overrides win over config.yaml: `LLM_PROVIDER` → `llm.provider`, `LLM_MODEL` → `llm.model` (auto-detects provider via `LookupModelInfo` when `LLM_PROVIDER` is unset, mirroring `edgebot config --model`), `LITERTLM_BACKEND` → `litertlm.backend` (see `applyEnvOverrides`). `docker-compose.yml` sets `LLM_PROVIDER=litertlm`/`LLM_MODEL=gemma-4-E2B-it` for the bot stack. All 6 tools enabled by default. Set via `edgebot config --think-effort low` (empty resets).
+`.env.example` documents the recognized env vars. Defaults: provider=ollama, model=granite4:3b-h, log_level=info, confirm=true, allowed_commands=ls,pwd, agent=build, agent_files=true, skills=true, llm.think_effort="" (provider default). litertlm backend defaults to `cpu`. Explicit env overrides win over config.yaml: `LLM_PROVIDER` → `llm.provider`, `LLM_MODEL` → `llm.model` (auto-detects provider via `LookupModelInfo` when `LLM_PROVIDER` is unset, mirroring `edgebot config --model`), `LLM_DECISION_MODEL` → `llm.decision_model` (the `edgebot decide` default, empty = unset), `LITERTLM_BACKEND` → `litertlm.backend` (see `applyEnvOverrides`). `docker-compose.yml` sets `LLM_PROVIDER=litertlm`/`LLM_MODEL=gemma-4-E2B-it` for the bot stack. All 6 tools enabled by default. Set via `edgebot config --think-effort low` (empty resets).
 
 `agent_files` toggles AGENTS.md support: `llm.GetAgentFiles(true)` loads `~/.config/edgebot/AGENTS.md` and `./AGENTS.md` as extra system-prompt instructions. Toggle via `edgebot config --agent-files=false`.
 
@@ -74,8 +74,8 @@ Persistent `--debug` flag on the root command. `cmd.initLogger(cfg)` temporarily
 ## Config command (cmd/config.go)
 
 - Usable as `edgebot config` (shows current config via `PrintConfig`) or `edgebot config --flag value`
-- Flags: `--provider`, `--model`, `--agent`, `--agent-files`, `--skills`, `--log-level`, `--confirm`, `--allowed-commands`, `--backend`, `--think-effort`, `--enable-tool`, `--disable-tool`, `--add-cmd`, `--rm-cmd`
-- `--model` without `--provider` auto-detects provider via `config.LookupModelInfo`; `--add-cmd` uses `name=prompt` format
+- Flags: `--provider`, `--model`, `--decision-model`, `--agent`, `--agent-files`, `--skills`, `--log-level`, `--confirm`, `--allowed-commands`, `--backend`, `--think-effort`, `--enable-tool`, `--disable-tool`, `--add-cmd`, `--rm-cmd`
+- `--model` without `--provider` auto-detects provider via `config.LookupModelInfo`; a decision model name is routed to the decision default with a note instead of the chat model; `--decision-model` validates via `config.SaveDecisionModel`; `--add-cmd` uses `name=prompt` format
 
 ## Commands command (cmd/commands.go)
 
@@ -96,7 +96,7 @@ Persistent `--debug` flag on the root command. `cmd.initLogger(cfg)` temporarily
 ## Decide command (cmd/decide.go)
 
 - Usable as `edgebot decide --request req.json` (TypeSafe `/v1/systemone` JSON file, `-` for stdin) or single-question mode: `--state`/`--state-file` plus exactly one of `--choice`/`--score`/`--noul` (`"instructions|..."` pipe-separated; choice options are `name` or `name=description`)
-- Self-describing System One GGUFs only (`decide.Open`: openjev/lev/laya/kev, no config sidecar); resolved via `llm.ResolveDecisionModelPath` in `~/.edgebot/models/llamacpp/` (`.gguf` fallback like `LlamacppCaller`); `--model` defaults to the configured model when provider is llamacpp
+- Self-describing System One GGUFs only (`decide.Open`: openjev/lev/laya/kev, no config sidecar); resolved via `llm.ResolveDecisionModelPath` in `~/.edgebot/models/llamacpp/` (`.gguf` fallback like `LlamacppCaller`); `--model` defaults to the configured decision model (`llm.decision_model`, set via `edgebot config --decision-model`), with a legacy fallback to the chat model when it points at a decision GGUF
 - `--both-orders` averages choice questions over both option orders; `-o` / `--output` writes the indented JSON response to a file; input tokens recorded via `stats.RecordUsage` under provider `llamacpp`; never routes through the service (local-only, like structured commands)
 
 ## Extract command (cmd/extract.go)
@@ -107,10 +107,10 @@ Persistent `--debug` flag on the root command. `cmd.initLogger(cfg)` temporarily
 
 - Usable as `edgebot models` or `edgebot models pull <repo> <model> [mmproj]`
 - Lists models in a table (Model, Provider, Type, Size, Input Types); current model prefixed with `* `. Type is `llm` except for llamacpp GGUFs carrying System One decision metadata (`<arch>.decision.type` key, detected by a header-only scan in `config/gguf.go`), which show as `decision`
-- `-s` / `--set <model>` sets the current model; `-d` / `--delete <model>` deletes a local GGUF/`.litertlm` file (also removes paired mmproj for llamacpp)
+- `-s` / `--set <model>` sets the current model; `-d` / `--delete <model>` deletes a local GGUF/`.litertlm` file (also removes paired mmproj for llamacpp). `--set` routes through `config.SetDefaultModel`: decision models become the `decide` default, everything else the chat default. Chat default marked `*`, decision default `D` (legend printed under the table)
 - For llamacpp, Size from GGUF file info. Input types: gemini hardcoded; openrouter from API `input_modalities`; llamacpp `text, image` when an `mmproj-*` file matches; ollama/litertlm `-`
-- `pull` downloads from HuggingFace; `.litertlm` → `~/.edgebot/models/litertlm/`, else `.gguf` → `~/.edgebot/models/llamacpp/`
-- Validates `repo` (`owner/name`) and `filename` (no path traversal); `http.Client` with 10 min timeout; progress bar; auto-updates config via `config.SaveModelWithProvider` (second file auto-detected as vision projector); cleans up partial files on failure (explicit `Close` before `Remove`)
+- `pull` downloads from HuggingFace; `.litertlm` → `~/.edgebot/models/litertlm/`, else `.gguf` → `~/.edgebot/models/llamacpp/`. A pulled GGUF with decision metadata is recorded via `config.SaveDecisionModel` instead of the chat default
+- Validates `repo` (`owner/name`) and `filename` (no path traversal); `http.Client` with 10 min timeout; progress bar; auto-updates config via `config.SaveModelWithProvider` (second file auto-detected as vision projector; decision GGUFs go to `SaveDecisionModel` instead); cleans up partial files on failure (explicit `Close` before `Remove`)
 
 ## Skills command (cmd/skills.go)
 

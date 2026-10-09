@@ -113,8 +113,8 @@ func TestIsDecisionModelFile(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isDecisionModelFile(tc.path); got != tc.want {
-				t.Errorf("isDecisionModelFile() = %v, want %v", got, tc.want)
+			if got := IsDecisionModelFile(tc.path); got != tc.want {
+				t.Errorf("IsDecisionModelFile() = %v, want %v", got, tc.want)
 			}
 		})
 	}

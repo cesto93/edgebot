@@ -39,10 +39,13 @@ type Config struct {
 	AgentFiles bool   `mapstructure:"agent_files"`
 	Skills     bool   `mapstructure:"skills"`
 	LLM        struct {
-		Provider    string   `mapstructure:"provider"`
-		Model       string   `mapstructure:"model"`
-		InputTypes  []string `mapstructure:"input_types"`
-		ThinkEffort string   `mapstructure:"think_effort"`
+		Provider string `mapstructure:"provider"`
+		Model    string `mapstructure:"model"`
+		// DecisionModel is the default decision model for `edgebot decide`
+		// (a System One GGUF in the llamacpp models dir). Empty = unset.
+		DecisionModel string   `mapstructure:"decision_model"`
+		InputTypes    []string `mapstructure:"input_types"`
+		ThinkEffort   string   `mapstructure:"think_effort"`
 	} `mapstructure:"llm"`
 	Shell struct {
 		Confirm         bool     `mapstructure:"confirm"`
@@ -163,10 +166,11 @@ func LoadConfig() (*Config, error) {
 				AgentFiles: true,
 				Skills:     true,
 				LLM: struct {
-					Provider    string   `mapstructure:"provider"`
-					Model       string   `mapstructure:"model"`
-					InputTypes  []string `mapstructure:"input_types"`
-					ThinkEffort string   `mapstructure:"think_effort"`
+					Provider      string   `mapstructure:"provider"`
+					Model         string   `mapstructure:"model"`
+					DecisionModel string   `mapstructure:"decision_model"`
+					InputTypes    []string `mapstructure:"input_types"`
+					ThinkEffort   string   `mapstructure:"think_effort"`
 				}{
 					Provider:   "ollama",
 					Model:      "granite4:3b-h",
@@ -247,10 +251,14 @@ func LoadConfig() (*Config, error) {
 //	LLM_MODEL        overrides llm.model (when LLM_PROVIDER is unset, the
 //	                 provider is auto-detected via LookupModelInfo, like
 //	                 `edgebot config --model` does)
+//	LLM_DECISION_MODEL overrides llm.decision_model (the `edgebot decide` default)
 //	LITERTLM_BACKEND overrides litertlm.backend
 func applyEnvOverrides(cfg *Config) {
 	if v := strings.TrimSpace(os.Getenv("LITERTLM_BACKEND")); v != "" {
 		cfg.LitertLM.Backend = v
+	}
+	if v := strings.TrimSpace(os.Getenv("LLM_DECISION_MODEL")); v != "" {
+		cfg.LLM.DecisionModel = v
 	}
 	if v := strings.TrimSpace(os.Getenv("LLM_MODEL")); v != "" {
 		cfg.LLM.Model = v
@@ -356,10 +364,11 @@ func SaveConfig(cfg *Config) error {
 		AgentFiles bool   `yaml:"agent_files"`
 		Skills     bool   `yaml:"skills"`
 		LLM        struct {
-			Provider    string   `yaml:"provider"`
-			Model       string   `yaml:"model"`
-			InputTypes  []string `yaml:"input_types,omitempty"`
-			ThinkEffort string   `yaml:"think_effort,omitempty"`
+			Provider      string   `yaml:"provider"`
+			Model         string   `yaml:"model"`
+			DecisionModel string   `yaml:"decision_model,omitempty"`
+			InputTypes    []string `yaml:"input_types,omitempty"`
+			ThinkEffort   string   `yaml:"think_effort,omitempty"`
 		} `yaml:"llm"`
 		Shell struct {
 			Confirm         bool     `yaml:"confirm"`
@@ -380,6 +389,7 @@ func SaveConfig(cfg *Config) error {
 	}
 	out.LLM.Provider = cfg.LLM.Provider
 	out.LLM.Model = cfg.LLM.Model
+	out.LLM.DecisionModel = cfg.LLM.DecisionModel
 	out.LLM.InputTypes = cfg.LLM.InputTypes
 	out.LLM.ThinkEffort = cfg.LLM.ThinkEffort
 	out.Shell.Confirm = cfg.Shell.Confirm
@@ -446,6 +456,44 @@ func SaveModelWithProvider(modelName, provider string) error {
 	}
 
 	return SaveConfig(cfg)
+}
+
+// IsDecisionModel reports whether modelName is a locally available System
+// One decision model (a llamacpp GGUF carrying decision metadata).
+func IsDecisionModel(modelName string) bool {
+	info := LookupModelInfo(modelName)
+	return info != nil && info.Provider == "llamacpp" && info.ModelType() == ModelTypeDecision
+}
+
+// SaveDecisionModel records modelName as the default decision model used by
+// `edgebot decide`. The name must be a locally available decision GGUF.
+func SaveDecisionModel(modelName string) error {
+	if !IsDecisionModel(modelName) {
+		return fmt.Errorf("%q is not a local decision model (pull a System One GGUF with 'edgebot models pull <repo> <model.gguf>')", modelName)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	cfg.LLM.DecisionModel = modelName
+	return SaveConfig(cfg)
+}
+
+// SetDefaultModel records modelName as a default, routing by model type:
+// decision models become the `edgebot decide` default, everything else the
+// chat LLM default. It returns ModelTypeDecision or ModelTypeLLM so callers
+// can message which default was set.
+func SetDefaultModel(modelName, provider string) (string, error) {
+	if IsDecisionModel(modelName) {
+		if err := SaveDecisionModel(modelName); err != nil {
+			return "", err
+		}
+		return ModelTypeDecision, nil
+	}
+	if err := SaveModelWithProvider(modelName, provider); err != nil {
+		return "", err
+	}
+	return ModelTypeLLM, nil
 }
 
 type ModelInfo struct {
@@ -594,7 +642,7 @@ func scanModels(dir, provider, ext string, probeDecision bool) []ModelInfo {
 			Provider: provider,
 			Size:     size,
 		}
-		if probeDecision && isDecisionModelFile(filepath.Join(dir, name)) {
+		if probeDecision && IsDecisionModelFile(filepath.Join(dir, name)) {
 			m.Type = ModelTypeDecision
 		}
 		models = append(models, m)
@@ -838,11 +886,14 @@ func SelectModel() error {
 	fmt.Printf("Available Models:\n\n")
 
 	for i, model := range models {
-		marker := "  "
+		mark := ""
 		if model.Name == cfg.LLM.Model {
-			marker = "* "
+			mark += "*"
 		}
-		fmt.Printf("[%d] %s%s (%s)\n", i+1, marker, model.Name, model.Provider)
+		if model.Provider == "llamacpp" && cfg.LLM.DecisionModel != "" && model.Name == cfg.LLM.DecisionModel {
+			mark += "D"
+		}
+		fmt.Printf("[%d] %-3s%s (%s)\n", i+1, mark, model.Name, model.Provider)
 	}
 
 	fmt.Printf("\nEnter number to select model (or press Enter to cancel): ")
@@ -864,7 +915,16 @@ func SelectModel() error {
 
 	selectedModel := models[choice-1].Name
 	selectedProvider := models[choice-1].Provider
-	return SaveModelWithProvider(selectedModel, selectedProvider)
+	kind, err := SetDefaultModel(selectedModel, selectedProvider)
+	if err != nil {
+		return err
+	}
+	if kind == ModelTypeDecision {
+		fmt.Printf("Decision model set to %s (used by `edgebot decide`)\n", selectedModel)
+		return nil
+	}
+	fmt.Printf("Model set to %s (provider: %s)\n", selectedModel, selectedProvider)
+	return nil
 }
 
 func IsAllowedCommand(cmd string, allowedList []string) bool {

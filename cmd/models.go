@@ -61,8 +61,13 @@ func runModels(cmd *cobra.Command) error {
 		if info == nil {
 			return fmt.Errorf("model %q not found", modelsSet)
 		}
-		if err := config.SaveModelWithProvider(modelsSet, info.Provider); err != nil {
+		kind, err := config.SetDefaultModel(modelsSet, info.Provider)
+		if err != nil {
 			return fmt.Errorf("failed to set model: %w", err)
+		}
+		if kind == config.ModelTypeDecision {
+			fmt.Printf("Decision model set to %s (used by `edgebot decide`)\n", modelsSet)
+			return nil
 		}
 		fmt.Printf("Model set to %s (provider: %s)\n", modelsSet, info.Provider)
 		return nil
@@ -87,7 +92,10 @@ func runModels(cmd *cobra.Command) error {
 	for _, m := range models {
 		marker := ""
 		if m.Name == cfg.LLM.Model && m.Provider == cfg.LLM.Provider {
-			marker = "*"
+			marker += "*"
+		}
+		if m.Provider == "llamacpp" && cfg.LLM.DecisionModel != "" && m.Name == cfg.LLM.DecisionModel {
+			marker += "D"
 		}
 		size := m.Size
 		if size == "" {
@@ -102,6 +110,7 @@ func runModels(cmd *cobra.Command) error {
 	if err := w.Flush(); err != nil {
 		return fmt.Errorf("flush: %w", err)
 	}
+	fmt.Println("* current chat model, D decision model used by `edgebot decide`")
 
 	return nil
 }

@@ -33,6 +33,11 @@ func PrintConfig() {
 	fmt.Printf("Skills: %s%v%s\n", ColorGreen, cfg.Skills, ColorReset)
 	fmt.Printf("Provider: %s%s%s\n", ColorGreen, cfg.LLM.Provider, ColorReset)
 	fmt.Printf("Model: %s%s%s\n", ColorGreen, cfg.LLM.Model, ColorReset)
+	decisionModel := cfg.LLM.DecisionModel
+	if decisionModel == "" {
+		decisionModel = "(not set)"
+	}
+	fmt.Printf("Decision Model: %s%s%s\n", ColorGreen, decisionModel, ColorReset)
 	thinkEffort := cfg.LLM.ThinkEffort
 	if thinkEffort == "" {
 		thinkEffort = "(provider default)"

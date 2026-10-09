@@ -88,13 +88,26 @@ func validateFilename(filename string) error {
 // updateConfig records the downloaded file in the config. With a single file
 // the model itself is saved; with two files the first is saved as the model
 // and the second is only downloaded — it is auto-detected as the vision
-// projector (mmproj) by scanning the models dir.
+// projector (mmproj) by scanning the models dir. A GGUF carrying System One
+// decision metadata becomes the decision default used by `edgebot decide`
+// instead of the chat model.
 func updateConfig(filename string, index, total int) error {
 	if total == 2 && index == 1 {
 		return nil
 	}
 	provider := providerForFilename(filename)
 	modelName := strings.TrimSuffix(filename, filepath.Ext(filename))
+	if provider == "llamacpp" {
+		if dir, err := config.ModelsDir(provider); err == nil {
+			if config.IsDecisionModelFile(filepath.Join(dir, filename)) {
+				if err := config.SaveDecisionModel(modelName); err != nil {
+					return err
+				}
+				fmt.Printf("Decision model set to %s (used by `edgebot decide`)\n", modelName)
+				return nil
+			}
+		}
+	}
 	return config.SaveModelWithProvider(modelName, provider)
 }
 

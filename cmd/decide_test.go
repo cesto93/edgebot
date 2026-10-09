@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"edgebot/config"
 )
 
 func resetDecideFlags() {
@@ -185,4 +187,38 @@ func TestDecideRequestFromFlags(t *testing.T) {
 			t.Errorf("unexpected state: %#v", req.State)
 		}
 	})
+}
+
+func TestResolveDecideModel(t *testing.T) {
+	newCfg := func() *config.Config { return &config.Config{} }
+
+	t.Run("flag wins", func(t *testing.T) {
+		cfg := newCfg()
+		cfg.LLM.DecisionModel = "configured"
+		got, err := resolveDecideModel(cfg, "  explicit  ")
+		if err != nil || got != "explicit" {
+			t.Errorf("got %q, %v", got, err)
+		}
+	})
+
+	t.Run("configured default", func(t *testing.T) {
+		cfg := newCfg()
+		cfg.LLM.DecisionModel = "lev-1"
+		got, err := resolveDecideModel(cfg, "")
+		if err != nil || got != "lev-1" {
+			t.Errorf("got %q, %v", got, err)
+		}
+	})
+
+	t.Run("nothing configured", func(t *testing.T) {
+		cfg := newCfg()
+		cfg.LLM.Provider = "ollama"
+		cfg.LLM.Model = "granite4:3b-h"
+		if _, err := resolveDecideModel(cfg, ""); err == nil {
+			t.Error("succeeded, want error")
+		}
+	})
+
+	// The legacy branch (chat default pointing at a decision GGUF) needs a
+	// live model lookup, so it is covered indirectly via config.IsDecisionModel.
 }

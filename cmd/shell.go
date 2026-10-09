@@ -811,11 +811,14 @@ func (m *ShellModel) renderMenu(sb *strings.Builder) {
 		sb.WriteString(systemStyle.Render("Select Model (↑/↓ to navigate, Enter to select, Esc to cancel):"))
 		sb.WriteString("\n")
 		for i, model := range m.menu.models {
-			marker := " "
+			marker := ""
 			if model.Name == m.cfg.LLM.Model {
-				marker = "*"
+				marker += "*"
 			}
-			label := fmt.Sprintf(" %s %s (%s) ", marker, model.Name, model.Provider)
+			if model.Provider == "llamacpp" && m.cfg.LLM.DecisionModel != "" && model.Name == m.cfg.LLM.DecisionModel {
+				marker += "D"
+			}
+			label := fmt.Sprintf(" %-3s%s (%s) ", marker, model.Name, model.Provider)
 			if i == m.menu.selectedIdx {
 				sb.WriteString(highlightStyle.Render(label))
 			} else {
@@ -1452,8 +1455,15 @@ func (m *ShellModel) selectModel() {
 	selectedModel := modelInfo.Name
 	provider := modelInfo.Provider
 
-	if err := config.SaveModelWithProvider(selectedModel, provider); err != nil {
+	if kind, err := config.SetDefaultModel(selectedModel, provider); err != nil {
 		m.messages = append(m.messages, Message{role: "error", content: fmt.Sprintf("Error saving model: %v", err)})
+	} else if kind == config.ModelTypeDecision {
+		m.messages = append(m.messages, Message{role: "system", content: fmt.Sprintf("Switched decision model to: %s (used by `edgebot decide`)", selectedModel)})
+		if newCfg, err := config.LoadConfig(); err == nil {
+			m.cfg = newCfg
+		} else {
+			slog.Warn("reload config failed", "err", err)
+		}
 	} else {
 		m.messages = append(m.messages, Message{role: "system", content: fmt.Sprintf("Switched to model: %s", selectedModel)})
 		if newCfg, err := config.LoadConfig(); err == nil {

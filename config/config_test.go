@@ -892,10 +892,11 @@ func TestSaveConfig(t *testing.T) {
 		ConfigFile: configFile,
 		LogLevel:   "info",
 		LLM: struct {
-			Provider    string   `mapstructure:"provider"`
-			Model       string   `mapstructure:"model"`
-			InputTypes  []string `mapstructure:"input_types"`
-			ThinkEffort string   `mapstructure:"think_effort"`
+			Provider      string   `mapstructure:"provider"`
+			Model         string   `mapstructure:"model"`
+			DecisionModel string   `mapstructure:"decision_model"`
+			InputTypes    []string `mapstructure:"input_types"`
+			ThinkEffort   string   `mapstructure:"think_effort"`
 		}{
 			Provider: "ollama",
 			Model:    "test-model",
@@ -943,10 +944,11 @@ func TestSaveConfigEmptyPath(t *testing.T) {
 	cfg := &Config{
 		LogLevel: "info",
 		LLM: struct {
-			Provider    string   `mapstructure:"provider"`
-			Model       string   `mapstructure:"model"`
-			InputTypes  []string `mapstructure:"input_types"`
-			ThinkEffort string   `mapstructure:"think_effort"`
+			Provider      string   `mapstructure:"provider"`
+			Model         string   `mapstructure:"model"`
+			DecisionModel string   `mapstructure:"decision_model"`
+			InputTypes    []string `mapstructure:"input_types"`
+			ThinkEffort   string   `mapstructure:"think_effort"`
 		}{
 			Provider: "gemini",
 			Model:    "gemini-3.7-flash",

@@ -32,7 +32,8 @@ var decideCmd = &cobra.Command{
 Decision models answer typed questions with calibrated probabilities instead
 of text. The model must be a self-describing System One GGUF (openjev, lev,
 laya, kev, ...) in ~/.edgebot/models/llamacpp/ — pull one with
-'edgebot models pull <repo> <model.gguf>' first.
+'edgebot models pull <repo> <model.gguf>' first. The model comes from --model
+or the configured decision default ('edgebot config --decision-model').
 
 Two input modes (mutually exclusive):
 
@@ -58,7 +59,7 @@ written to --output.`,
 
 func init() {
 	rootCmd.AddCommand(decideCmd)
-	decideCmd.Flags().StringVar(&decideModel, "model", "", "decision model name in the llamacpp models dir (default: configured model when provider is llamacpp)")
+	decideCmd.Flags().StringVar(&decideModel, "model", "", "decision model name (default: the configured decision model)")
 	decideCmd.Flags().StringVar(&decideRequest, "request", "", "TypeSafe /v1/systemone JSON request file ('-' for stdin)")
 	decideCmd.Flags().StringVar(&decideState, "state", "", "state to judge (plain text or JSON)")
 	decideCmd.Flags().StringVar(&decideStateFile, "state-file", "", "read the state from a file")
@@ -76,15 +77,9 @@ func runDecide() error {
 	}
 	initLogger(cfg)
 
-	model := decideModel
-	if model == "" {
-		if cfg.LLM.Provider != "llamacpp" {
-			return fmt.Errorf("--model is required (configured provider is %q, not llamacpp)", cfg.LLM.Provider)
-		}
-		model = cfg.LLM.Model
-	}
-	if strings.TrimSpace(model) == "" {
-		return fmt.Errorf("--model is required")
+	model, err := resolveDecideModel(cfg, decideModel)
+	if err != nil {
+		return err
 	}
 
 	req, err := decideRequestFromFlags()
@@ -129,6 +124,22 @@ func runDecide() error {
 	}
 	fmt.Println(out)
 	return nil
+}
+
+// resolveDecideModel picks the decision model: the --model flag wins, then
+// the configured decision default, then (for configs predating the decision
+// default) the chat model when it points at a decision GGUF.
+func resolveDecideModel(cfg *config.Config, flag string) (string, error) {
+	if strings.TrimSpace(flag) != "" {
+		return strings.TrimSpace(flag), nil
+	}
+	if strings.TrimSpace(cfg.LLM.DecisionModel) != "" {
+		return cfg.LLM.DecisionModel, nil
+	}
+	if cfg.LLM.Provider == "llamacpp" && config.IsDecisionModel(cfg.LLM.Model) {
+		return cfg.LLM.Model, nil
+	}
+	return "", fmt.Errorf("no decision model configured (use --model or 'edgebot config --decision-model <name>')")
 }
 
 // decideRequestFromFlags builds the decision request from either --request or

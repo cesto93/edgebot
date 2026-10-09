@@ -25,12 +25,12 @@ const (
 	ggufTypeArray  = 9
 )
 
-// isDecisionModelFile reports whether the GGUF file carries System One
-// decision metadata, i.e. it is a decision model rather than a text LLM.
+// IsDecisionModelFile reports whether the GGUF file at path carries System
+// One decision metadata, i.e. it is a decision model rather than a text LLM.
 // Only the metadata keys at the start of the file are read; weights are
 // never touched. Any read or parse failure returns false so an unknown
 // file is listed as a plain LLM.
-func isDecisionModelFile(path string) bool {
+func IsDecisionModelFile(path string) bool {
 	found, err := ggufHasKeySuffix(path, ggufDecisionKeySuffix)
 	if err != nil {
 		slog.Debug("decision metadata scan failed, treating as LLM", "path", path, "err", err)
