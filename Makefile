@@ -1,7 +1,8 @@
 SHELL := /bin/bash
 EDGEBOT_DIR := $(HOME)/.edgebot
 EDGEBOT_LIB := $(EDGEBOT_DIR)/lib
-YZMA_VERSION ?= v1.29.1
+# Yzma CLI version is taken from go.mod (keeps CLI and Go binding in sync).
+YZMA_VERSION ?= $(shell go list -m -f '{{.Version}}' github.com/hybridgroup/yzma 2>/dev/null)
 LITERTLM_TAG ?= main
 LITERTLM_VERSION ?= v0.16.0
 # LITERTLM_PLAT (linux_x86_64 | linux_arm64) defaults to the host arch inside
@@ -19,6 +20,7 @@ proto:
 	  service/proto/service.proto
 	@echo "Regenerated service/proto/*.pb.go (commit the generated files; protoc is only needed for regeneration)"
 install-yzma:
+	@test -n "$(YZMA_VERSION)" || { echo "error: cannot resolve yzma version from go.mod" >&2; exit 1; }
 	go install github.com/hybridgroup/yzma@$(YZMA_VERSION)
 	mkdir -p $(EDGEBOT_LIB)
 	yzma install --lib $(EDGEBOT_LIB) --upgrade

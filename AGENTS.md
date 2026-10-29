@@ -11,7 +11,7 @@ Entry point: `main.go` → `cmd.Execute()`. Default command launches Bubbletea T
 ```
 make build              # go build -o edgebot .
 make install            # go install .
-make install-yzma       # install yzma CLI + llama.cpp libs to ~/.edgebot/lib
+make install-yzma       # install yzma CLI (version from go.mod) + llama.cpp libs to ~/.edgebot/lib
 make install-litertlm   # download LiteRT-LM C-API lib + aux/GPU libs to ~/.edgebot/lib
 make proto              # regenerate service/proto/*.pb.go (needs protoc + plugins)
 make coverage           # test + HTML report
