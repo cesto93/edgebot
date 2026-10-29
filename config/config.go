@@ -43,9 +43,15 @@ type Config struct {
 		Model    string `mapstructure:"model"`
 		// DecisionModel is the default decision model for `edgebot decide`
 		// (a System One GGUF in the llamacpp models dir). Empty = unset.
-		DecisionModel string   `mapstructure:"decision_model"`
-		InputTypes    []string `mapstructure:"input_types"`
-		ThinkEffort   string   `mapstructure:"think_effort"`
+		DecisionModel string `mapstructure:"decision_model"`
+		// OCRModel is the default OCR model used by `edgebot ocr`. Empty =
+		// unset; pull an OCR GGUF or set it via `edgebot config --ocr-model`.
+		OCRModel string `mapstructure:"ocr_model"`
+		// OCRMMProj is the optional vision projector (mmproj) for OCRModel.
+		// Empty = auto-resolve by model name, then a unique projector.
+		OCRMMProj   string   `mapstructure:"ocr_mmproj"`
+		InputTypes  []string `mapstructure:"input_types"`
+		ThinkEffort string   `mapstructure:"think_effort"`
 	} `mapstructure:"llm"`
 	Shell struct {
 		Confirm         bool     `mapstructure:"confirm"`
@@ -169,6 +175,8 @@ func LoadConfig() (*Config, error) {
 					Provider      string   `mapstructure:"provider"`
 					Model         string   `mapstructure:"model"`
 					DecisionModel string   `mapstructure:"decision_model"`
+					OCRModel      string   `mapstructure:"ocr_model"`
+					OCRMMProj     string   `mapstructure:"ocr_mmproj"`
 					InputTypes    []string `mapstructure:"input_types"`
 					ThinkEffort   string   `mapstructure:"think_effort"`
 				}{
@@ -195,7 +203,7 @@ func LoadConfig() (*Config, error) {
 				if mkErr := os.MkdirAll(configPath, 0o755); mkErr == nil {
 					defaultConfigFile := filepath.Join(configPath, "config.yaml")
 					if _, statErr := os.Stat(defaultConfigFile); os.IsNotExist(statErr) {
-						content := "log_level: \"info\"\nagent: \"build\"\nagent_files: true\nskills: true\nllm:\n  provider: \"ollama\"\n  model: \"granite4:3b-h\"\n  input_types:\n    - \"text\"\nshell:\n  confirm: true\n  allowed_commands:\n    - \"ls\"\n    - \"pwd\"\n    - \"git\"\nlitertlm:\n  backend: \"cpu\"\ntools:\n  RunCommand: true\n  WriteFile: true\n  ReadFile: true\n  KVSet: true\n  KVGet: true\n  KVList: true\n"
+						content := "log_level: \"info\"\nagent: \"build\"\nagent_files: true\nskills: true\nllm:\n  provider: \"ollama\"\n  model: \"granite4:3b-h\"\n  ocr_model: \"\"\n  input_types:\n    - \"text\"\nshell:\n  confirm: true\n  allowed_commands:\n    - \"ls\"\n    - \"pwd\"\n    - \"git\"\nlitertlm:\n  backend: \"cpu\"\ntools:\n  RunCommand: true\n  WriteFile: true\n  ReadFile: true\n  KVSet: true\n  KVGet: true\n  KVList: true\n"
 						if writeErr := os.WriteFile(defaultConfigFile, []byte(content), 0o644); writeErr != nil {
 							slog.Warn("failed to write default config", "err", writeErr)
 						} else {
@@ -252,6 +260,8 @@ func LoadConfig() (*Config, error) {
 //	                 provider is auto-detected via LookupModelInfo, like
 //	                 `edgebot config --model` does)
 //	LLM_DECISION_MODEL overrides llm.decision_model (the `edgebot decide` default)
+//	LLM_OCR_MODEL    overrides llm.ocr_model (the `edgebot ocr` default)
+//	LLM_OCR_MMPROJ   overrides llm.ocr_mmproj (vision projector for the OCR model)
 //	LITERTLM_BACKEND overrides litertlm.backend
 func applyEnvOverrides(cfg *Config) {
 	if v := strings.TrimSpace(os.Getenv("LITERTLM_BACKEND")); v != "" {
@@ -259,6 +269,12 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := strings.TrimSpace(os.Getenv("LLM_DECISION_MODEL")); v != "" {
 		cfg.LLM.DecisionModel = v
+	}
+	if v := strings.TrimSpace(os.Getenv("LLM_OCR_MODEL")); v != "" {
+		cfg.LLM.OCRModel = v
+	}
+	if v := strings.TrimSpace(os.Getenv("LLM_OCR_MMPROJ")); v != "" {
+		cfg.LLM.OCRMMProj = v
 	}
 	if v := strings.TrimSpace(os.Getenv("LLM_MODEL")); v != "" {
 		cfg.LLM.Model = v
@@ -367,6 +383,8 @@ func SaveConfig(cfg *Config) error {
 			Provider      string   `yaml:"provider"`
 			Model         string   `yaml:"model"`
 			DecisionModel string   `yaml:"decision_model,omitempty"`
+			OCRModel      string   `yaml:"ocr_model,omitempty"`
+			OCRMMProj     string   `yaml:"ocr_mmproj,omitempty"`
 			InputTypes    []string `yaml:"input_types,omitempty"`
 			ThinkEffort   string   `yaml:"think_effort,omitempty"`
 		} `yaml:"llm"`
@@ -390,6 +408,8 @@ func SaveConfig(cfg *Config) error {
 	out.LLM.Provider = cfg.LLM.Provider
 	out.LLM.Model = cfg.LLM.Model
 	out.LLM.DecisionModel = cfg.LLM.DecisionModel
+	out.LLM.OCRModel = cfg.LLM.OCRModel
+	out.LLM.OCRMMProj = cfg.LLM.OCRMMProj
 	out.LLM.InputTypes = cfg.LLM.InputTypes
 	out.LLM.ThinkEffort = cfg.LLM.ThinkEffort
 	out.Shell.Confirm = cfg.Shell.Confirm
@@ -479,16 +499,55 @@ func SaveDecisionModel(modelName string) error {
 	return SaveConfig(cfg)
 }
 
+// IsOCRModel reports whether modelName is a task-specific OCR model. Local
+// GGUFs are classified from their metadata; remote models (and models without
+// metadata) fall back to an "OCR" word in the name.
+func IsOCRModel(modelName string) bool {
+	if IsDecisionModel(modelName) {
+		return false
+	}
+	info := LookupModelInfo(modelName)
+	return info != nil && info.ModelType() == ModelTypeOCR
+}
+
+// IsOCRName reports whether a model name or id contains "OCR" as a word.
+// OCR models are multimodal just like general vision LLMs, so the name/type is
+// the signal used to tell them apart for non-local providers.
+func IsOCRName(modelName string) bool {
+	return ocrNameRe.MatchString(modelName)
+}
+
+// SaveOCRModel records modelName as the default OCR model used by
+// `edgebot ocr`. The name must be a locally available (or listed) OCR model.
+func SaveOCRModel(modelName string) error {
+	if !IsOCRModel(modelName) {
+		return fmt.Errorf("%q is not an OCR model (pull one with 'edgebot models pull <repo> <model.gguf> [mmproj.gguf]')", modelName)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	cfg.LLM.OCRModel = modelName
+	return SaveConfig(cfg)
+}
+
 // SetDefaultModel records modelName as a default, routing by model type:
-// decision models become the `edgebot decide` default, everything else the
-// chat LLM default. It returns ModelTypeDecision or ModelTypeLLM so callers
-// can message which default was set.
+// decision models become the `edgebot decide` default, OCR models the
+// `edgebot ocr` default, everything else the chat LLM default. It returns
+// ModelTypeDecision, ModelTypeOCR or ModelTypeLLM so callers can message
+// which default was set.
 func SetDefaultModel(modelName, provider string) (string, error) {
 	if IsDecisionModel(modelName) {
 		if err := SaveDecisionModel(modelName); err != nil {
 			return "", err
 		}
 		return ModelTypeDecision, nil
+	}
+	if IsOCRModel(modelName) {
+		if err := SaveOCRModel(modelName); err != nil {
+			return "", err
+		}
+		return ModelTypeOCR, nil
 	}
 	if err := SaveModelWithProvider(modelName, provider); err != nil {
 		return "", err
@@ -502,9 +561,11 @@ type ModelInfo struct {
 	Size       string
 	ModifiedAt string
 	InputTypes []string
-	// Type is ModelTypeDecision for System One decision models and empty
-	// (meaning ModelTypeLLM) for everything else. Only llamacpp GGUFs are
-	// probed; use ModelType() for display.
+	// Type is ModelTypeDecision for System One decision models, ModelTypeOCR
+	// for task-specific OCR models, and empty (meaning ModelTypeLLM) for
+	// everything else. Only llamacpp GGUFs are metadata-probed; use ModelType()
+	// for display. Type is the model's purpose, while InputTypes describes its
+	// modality: an OCR model still has text+image input types.
 	Type string
 }
 
@@ -512,13 +573,18 @@ type ModelInfo struct {
 const (
 	ModelTypeLLM      = "llm"
 	ModelTypeDecision = "decision"
+	ModelTypeOCR      = "ocr"
 )
 
 // ModelType returns the display type of the model: "decision" for System One
-// decision models, "llm" for everything else.
+// decision models, "ocr" for task-specific OCR models, "llm" for everything
+// else.
 func (m ModelInfo) ModelType() string {
 	if m.Type == ModelTypeDecision {
 		return ModelTypeDecision
+	}
+	if m.Type == ModelTypeOCR {
+		return ModelTypeOCR
 	}
 	return ModelTypeLLM
 }
@@ -542,7 +608,8 @@ func GetLitertLMModels() []ModelInfo {
 
 // GetLlamacppModels lists the GGUF models on disk (excluding vision projector
 // files). Models whose base name matches an available mmproj file get the
-// image input type.
+// image input type; OCR models also accept a unique projector under an
+// unrelated filename (e.g. MiniCPM-OCR's mmproj-model-f16-4x.gguf).
 func GetLlamacppModels() []ModelInfo {
 	dir, err := ModelsDir("llamacpp")
 	if err != nil {
@@ -550,17 +617,19 @@ func GetLlamacppModels() []ModelInfo {
 	}
 	all := scanModels(dir, "llamacpp", ".gguf", true)
 	visionKeys := map[string]bool{}
-	var models []ModelInfo
+	mmprojCount := 0
 	for _, m := range all {
 		if strings.Contains(strings.ToLower(m.Name), "mmproj") {
 			visionKeys[llamacppVisionKey(m.Name)] = true
+			mmprojCount++
 		}
 	}
+	var models []ModelInfo
 	for _, m := range all {
 		if strings.Contains(strings.ToLower(m.Name), "mmproj") {
 			continue
 		}
-		if visionKeys[llamacppVisionKey(m.Name)] {
+		if visionKeys[llamacppVisionKey(m.Name)] || (mmprojCount == 1 && m.Type == ModelTypeOCR) {
 			m.InputTypes = []string{"text", "image"}
 		}
 		models = append(models, m)
@@ -610,6 +679,62 @@ func FindLlamacppMMProj() (string, error) {
 	return "", nil
 }
 
+// FindLlamacppMMProjForModel resolves the vision projector (mmproj) for a
+// specific model. It first tries a name match (normalizing quantization
+// suffixes); when no projector is named after the model, a unique projector in
+// the models dir is used as a fallback (MiniCPM-OCR ships
+// mmproj-model-f16-4x.gguf next to MiniCPM-OCR-1_0-*.gguf). With several
+// unrelated projectors it returns an error instead of guessing.
+func FindLlamacppMMProjForModel(modelName string) (string, error) {
+	dir, err := ModelsDir("llamacpp")
+	if err != nil {
+		return "", err
+	}
+	candidates, err := llamacppMMProjFiles(dir)
+	if err != nil {
+		return "", err
+	}
+	if len(candidates) == 0 {
+		return "", nil
+	}
+	key := llamacppVisionKey(modelName)
+	for _, base := range candidates {
+		if llamacppVisionKey(base) == key {
+			return filepath.Join(dir, base+".gguf"), nil
+		}
+	}
+	if len(candidates) == 1 {
+		return filepath.Join(dir, candidates[0]+".gguf"), nil
+	}
+	return "", fmt.Errorf(
+		"multiple vision projectors found in %s (%s); set llm.ocr_mmproj or rename one to match the model",
+		dir, strings.Join(candidates, ", "))
+}
+
+// llamacppMMProjFiles lists the base names of mmproj GGUF files in dir.
+func llamacppMMProjFiles(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("scan mmproj: %w", err)
+	}
+	var bases []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		lower := strings.ToLower(name)
+		if !strings.HasSuffix(lower, ".gguf") || !strings.Contains(lower, "mmproj") {
+			continue
+		}
+		bases = append(bases, name[:len(name)-len(".gguf")])
+	}
+	return bases, nil
+}
+
 // scanModels lists the files with the given extension in dir as ModelInfos.
 // When probeDecision is set, GGUF files are scanned for System One decision
 // metadata and marked ModelTypeDecision.
@@ -644,6 +769,10 @@ func scanModels(dir, provider, ext string, probeDecision bool) []ModelInfo {
 		}
 		if probeDecision && IsDecisionModelFile(filepath.Join(dir, name)) {
 			m.Type = ModelTypeDecision
+		} else if probeDecision && IsOCRModelFile(filepath.Join(dir, name)) {
+			m.Type = ModelTypeOCR
+		} else if IsOCRName(modelName) {
+			m.Type = ModelTypeOCR
 		}
 		models = append(models, m)
 	}
@@ -676,12 +805,24 @@ func DeleteLocalModel(modelName string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Classify before removing the file: LookupModelInfo can no longer
+		// see it afterwards.
+		isOCR := IsOCRModelFile(filepath.Join(dir, modelName+".gguf"))
 		path, err := removeModelFile(filepath.Join(dir, modelName+".gguf"))
 		if err != nil {
 			return nil, err
 		}
 		removed := []string{path}
-		for _, proj := range llamacppMMProjsForModel(dir, modelName) {
+		projs := llamacppMMProjsForModel(dir, modelName)
+		// OCR models may ship a projector under an unrelated name (e.g.
+		// MiniCPM-OCR's mmproj-model-f16-4x.gguf); remove it when it is the
+		// only projector, matching the runtime resolver.
+		if len(projs) == 0 && isOCR {
+			if proj, _ := FindLlamacppMMProjForModel(modelName); proj != "" {
+				projs = append(projs, strings.TrimSuffix(filepath.Base(proj), ".gguf"))
+			}
+		}
+		for _, proj := range projs {
 			projPath := filepath.Join(dir, proj+".gguf")
 			if _, err := removeModelFile(projPath); err != nil {
 				if !os.IsNotExist(err) {
@@ -845,6 +986,11 @@ func GetAllAvailableModels() []ModelInfo {
 	models = append(models, getOpenRouterModelsFunc()...)
 	models = append(models, GetLitertLMModels()...)
 	models = append(models, GetLlamacppModels()...)
+	for i := range models {
+		if models[i].Type == "" && IsOCRName(models[i].Name) {
+			models[i].Type = ModelTypeOCR
+		}
+	}
 	return models
 }
 

@@ -53,13 +53,17 @@ func runPull(repo string, filenames []string) error {
 		}
 	}
 	var lastErr error
+	downloaded := make([]bool, len(filenames))
 	for i, filename := range filenames {
 		if err := downloadFile(repo, filename); err != nil {
 			lastErr = err
 			fmt.Fprintf(os.Stderr, "Failed to download %s: %v\n", filename, err)
 			continue
 		}
-		if err := updateConfig(filename, i, len(filenames)); err != nil {
+		downloaded[i] = true
+	}
+	if downloaded[0] {
+		if err := updateConfig(filenames, downloaded); err != nil {
 			fmt.Printf("Warning: failed to update config: %v\n", err)
 		}
 	}
@@ -85,25 +89,43 @@ func validateFilename(filename string) error {
 	return nil
 }
 
-// updateConfig records the downloaded file in the config. With a single file
-// the model itself is saved; with two files the first is saved as the model
-// and the second is only downloaded — it is auto-detected as the vision
-// projector (mmproj) by scanning the models dir. A GGUF carrying System One
-// decision metadata becomes the decision default used by `edgebot decide`
-// instead of the chat model.
-func updateConfig(filename string, index, total int) error {
-	if total == 2 && index == 1 {
+// updateConfig records the downloaded file(s) in the config: the first is the
+// model, an optional second is its vision projector (mmproj), which is
+// auto-detected by scanning the models dir. A GGUF carrying System One
+// decision metadata becomes the decision default used by `edgebot decide`; an
+// OCR GGUF becomes the `edgebot ocr` default and remembers its projector.
+func updateConfig(filenames []string, downloaded []bool) error {
+	if len(filenames) == 0 {
 		return nil
 	}
+	filename := filenames[0]
 	provider := providerForFilename(filename)
 	modelName := strings.TrimSuffix(filename, filepath.Ext(filename))
 	if provider == "llamacpp" {
 		if dir, err := config.ModelsDir(provider); err == nil {
-			if config.IsDecisionModelFile(filepath.Join(dir, filename)) {
+			path := filepath.Join(dir, filename)
+			if config.IsDecisionModelFile(path) {
 				if err := config.SaveDecisionModel(modelName); err != nil {
 					return err
 				}
 				fmt.Printf("Decision model set to %s (used by `edgebot decide`)\n", modelName)
+				return nil
+			}
+			if config.IsOCRModelFile(path) {
+				if err := config.SaveOCRModel(modelName); err != nil {
+					return err
+				}
+				if len(filenames) > 1 && len(downloaded) > 1 && downloaded[1] {
+					cfg, err := config.LoadConfig()
+					if err != nil {
+						return fmt.Errorf("failed to load config: %w", err)
+					}
+					cfg.LLM.OCRMMProj = strings.TrimSuffix(filenames[1], filepath.Ext(filenames[1]))
+					if err := config.SaveConfig(cfg); err != nil {
+						return fmt.Errorf("failed to save OCR projector: %w", err)
+					}
+				}
+				fmt.Printf("OCR model set to %s (used by `edgebot ocr`)\n", modelName)
 				return nil
 			}
 		}

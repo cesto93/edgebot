@@ -21,6 +21,12 @@ type LlamacppCaller struct {
 	Executor ToolExecutor
 	// MaxTokens caps generated tokens; <=0 means llamacppDefaultMaxTokens.
 	MaxTokens int
+	// CtxSize overrides the inference context size; <=0 means
+	// llamacppDefaultCtxSize. OCR needs a larger window for dense pages.
+	CtxSize int
+	// MMProj is an explicit vision projector filename/path. Empty means
+	// resolve it from the model name (then a unique projector).
+	MMProj string
 	// NoThink pre-fills an empty <think> block so reasoning models answer
 	// directly instead of thinking out loud (for short-form tasks).
 	NoThink bool
@@ -232,14 +238,22 @@ func imagesPresent(messages []Message) bool {
 	return false
 }
 
+// ctxSize returns the inference context size for this caller.
+func (l *LlamacppCaller) ctxSize() int {
+	if l.CtxSize > 0 {
+		return l.CtxSize
+	}
+	return llamacppDefaultCtxSize
+}
+
 func (l *LlamacppCaller) generate(ctx context.Context, prompt string, smplr llama.Sampler) ([]Message, error) {
 	tokens := llama.Tokenize(l.vocab, l.maybeNoThink(prompt), true, true)
 	if len(tokens) == 0 {
 		return nil, fmt.Errorf("tokenization failed")
 	}
-	if len(tokens) > llamacppDefaultCtxSize {
+	if len(tokens) > l.ctxSize() {
 		return nil, fmt.Errorf("llamacpp: prompt too long (%d tokens > context size %d), shorten the input",
-			len(tokens), llamacppDefaultCtxSize)
+			len(tokens), l.ctxSize())
 	}
 
 	select {
@@ -259,7 +273,7 @@ func (l *LlamacppCaller) generate(ctx context.Context, prompt string, smplr llam
 // (GGML_ASSERT(n_tokens_all <= cparams.n_batch)). Only the final token needs
 // logits, since sampling starts from it.
 func (l *LlamacppCaller) decodePrompt(ctx context.Context, tokens []llama.Token) error {
-	batch := llama.BatchInit(llamacppDefaultCtxSize, 0, 1)
+	batch := llama.BatchInit(int32(l.ctxSize()), 0, 1)
 	defer func() { _ = llama.BatchFree(batch) }()
 
 	for offset := 0; offset < len(tokens); {
@@ -271,7 +285,7 @@ func (l *LlamacppCaller) decodePrompt(ctx context.Context, tokens []llama.Token)
 		if err := batch.Clear(); err != nil {
 			return fmt.Errorf("llamacpp decode: %w", err)
 		}
-		n := min(int(llamacppDefaultCtxSize), len(tokens)-offset)
+		n := min(l.ctxSize(), len(tokens)-offset)
 		for i := range n {
 			last := offset+i == len(tokens)-1
 			if err := batch.Add(tokens[offset+i], llama.Pos(offset+i), []llama.SeqId{0}, last); err != nil {
@@ -333,13 +347,12 @@ func (l *LlamacppCaller) generateVision(ctx context.Context, inp *visionInput, s
 	}
 
 	var nPast llama.Pos
-	if res := mtmd.HelperEvalChunks(l.mtmdCtx, l.lctx, chunks, 0, 0, int32(llamacppDefaultCtxSize), true, &nPast); res != 0 {
+	if res := mtmd.HelperEvalChunks(l.mtmdCtx, l.lctx, chunks, 0, 0, int32(l.ctxSize()), true, &nPast); res != 0 {
 		return nil, fmt.Errorf("llamacpp: mtmd eval chunks failed: %d", res)
 	}
 
-	// Use token count for usage stats, consistent with text path.
-	promptTokens := len(llama.Tokenize(l.vocab, inp.prompt, true, true))
-	return l.sample(ctx, smplr, promptTokens)
+	// nPast is the position after all prompt chunks, including image tokens.
+	return l.sample(ctx, smplr, int(nPast))
 }
 
 // sample runs the token generation loop from the current context state (the
@@ -347,7 +360,16 @@ func (l *LlamacppCaller) generateVision(ctx context.Context, inp *visionInput, s
 func (l *LlamacppCaller) sample(ctx context.Context, smplr llama.Sampler, promptTokens int) ([]Message, error) {
 	var response strings.Builder
 	completionTokens := 0
-	for pos := int32(0); pos < l.maxTokens(); pos++ {
+	limit := l.maxTokens()
+	if remaining := l.ctxSize() - promptTokens; remaining < int(limit) {
+		if remaining <= 0 {
+			return nil, fmt.Errorf("llamacpp: prompt uses the whole context (%d/%d tokens)", promptTokens, l.ctxSize())
+		}
+		limit = int32(remaining)
+		slog.Warn("llamacpp: generation limited by context window",
+			"prompt_tokens", promptTokens, "ctx_size", l.ctxSize(), "max_new", limit)
+	}
+	for pos := int32(0); pos < limit; pos++ {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -500,8 +522,8 @@ func (l *LlamacppCaller) initialize() error {
 	l.vocab = llama.ModelGetVocab(llm)
 
 	ctxParams := llama.ContextDefaultParams()
-	ctxParams.NCtx = llamacppDefaultCtxSize
-	ctxParams.NBatch = llamacppDefaultCtxSize
+	ctxParams.NCtx = uint32(l.ctxSize())
+	ctxParams.NBatch = uint32(l.ctxSize())
 
 	slog.Debug("llamacpp: creating context")
 	lctx, err := llama.InitFromModel(llm, ctxParams)
@@ -532,13 +554,40 @@ func (l *LlamacppCaller) initialize() error {
 	return nil
 }
 
+// resolveMMProj returns the vision projector to load: the explicit MMProj
+// when set, otherwise the projector resolved from the model name (with a
+// unique-projector fallback).
+func (l *LlamacppCaller) resolveMMProj() (string, error) {
+	if l.MMProj == "" {
+		return config.FindLlamacppMMProjForModel(l.Model)
+	}
+	path := l.MMProj
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(l.modelDir, path)
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+	if filepath.Ext(path) == "" {
+		if _, err := os.Stat(path + ".gguf"); err == nil {
+			return path + ".gguf", nil
+		}
+	}
+	return "", fmt.Errorf("vision projector not found: %s", l.MMProj)
+}
+
 // setupVision initializes the mtmd (multimodal) context when a vision
 // projector (mmproj) is available. Failures degrade gracefully: text-only
 // inference keeps working and image requests surface a clear error.
 func (l *LlamacppCaller) setupVision(llm llama.Model) {
-	mmproj, err := config.FindLlamacppMMProj()
-	if err != nil || mmproj == "" {
-		slog.Debug("llamacpp: no mmproj found, image input disabled", "err", err)
+	mmproj, err := l.resolveMMProj()
+	if err != nil {
+		slog.Warn("llamacpp: vision projector resolution failed, image input disabled",
+			"model", l.Model, "err", err)
+		return
+	}
+	if mmproj == "" {
+		slog.Debug("llamacpp: no mmproj found, image input disabled")
 		return
 	}
 	if err := mtmd.Load(l.libDir); err != nil {

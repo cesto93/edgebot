@@ -69,6 +69,10 @@ func runModels(cmd *cobra.Command) error {
 			fmt.Printf("Decision model set to %s (used by `edgebot decide`)\n", modelsSet)
 			return nil
 		}
+		if kind == config.ModelTypeOCR {
+			fmt.Printf("OCR model set to %s (used by `edgebot ocr`)\n", modelsSet)
+			return nil
+		}
 		fmt.Printf("Model set to %s (provider: %s)\n", modelsSet, info.Provider)
 		return nil
 	}
@@ -97,6 +101,9 @@ func runModels(cmd *cobra.Command) error {
 		if m.Provider == "llamacpp" && cfg.LLM.DecisionModel != "" && m.Name == cfg.LLM.DecisionModel {
 			marker += "D"
 		}
+		if cfg.LLM.OCRModel != "" && m.Name == cfg.LLM.OCRModel {
+			marker += "O"
+		}
 		size := m.Size
 		if size == "" {
 			size = "-"
@@ -110,7 +117,7 @@ func runModels(cmd *cobra.Command) error {
 	if err := w.Flush(); err != nil {
 		return fmt.Errorf("flush: %w", err)
 	}
-	fmt.Println("* current chat model, D decision model used by `edgebot decide`")
+	fmt.Println("* current chat model, D decision model used by `edgebot decide`, O OCR model used by `edgebot ocr`")
 
 	return nil
 }

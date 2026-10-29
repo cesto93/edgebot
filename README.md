@@ -9,6 +9,7 @@ An interactive shell powered by AI (**Ollama, Gemini, OpenRouter, LitertLM, Llam
 - **System Awareness**: Automatically detects your Linux distribution and shell to provide tailored advice.
 - **Autonomous Tool Use**: The AI can execute shell commands (`RunCommand`), read files (`ReadFile`), and write files (`WriteFile`) autonomously (with your confirmation).
 - **Multi-Provider Support**: Ollama, Google Gemini, OpenRouter, LitertLM, and in-process Llamacpp (via yzma).
+- **OCR**: Extract text, tables, and formulas from images and PDFs with a dedicated local OCR model (`edgebot ocr`).
 - **Configurable**: Easily switch models and providers via a YAML configuration file.
 
 ## Prerequisites
@@ -123,6 +124,29 @@ Which returns something like:
 
 Supported inputs: `.txt`, `.md`, `.pdf` (extracted via `pdftotext`), and images `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` (requires a vision-capable model). File arguments may be used by any command, structured or not. Use `-o result.json` to write the output to a file instead of stdout.
 
+### OCR Documents And Images
+
+Pull an OCR model and its vision projector, then let edgebot configure it automatically:
+
+```bash
+edgebot models pull openbmb/MiniCPM-OCR-1.0-gguf \
+  MiniCPM-OCR-1_0-Q4_K_M.gguf mmproj-model-f16-4x.gguf
+```
+
+Extract text with the default `Text Recognition:` prompt:
+
+```bash
+edgebot ocr page.png
+edgebot ocr document.pdf
+edgebot ocr --mode table invoice.pdf -o invoice.md
+edgebot ocr --mode formula formulas.pdf
+edgebot ocr --pages 1-3 scanned.pdf
+```
+
+PDFs are rasterized page by page with `pdftoppm` (poppler-utils) and OCR'd
+sequentially. The default model comes from `llm.ocr_model`; override it with
+`--model` or set it with `edgebot config --ocr-model <model>`.
+
 ## Configuration
 
 The application looks for a `.env` file in:
@@ -144,6 +168,8 @@ Default configuration:
 llm:
   provider: "ollama"
   model: "granite4:3b-h"
+  ocr_model: ""            # optional, used by `edgebot ocr`
+  ocr_mmproj: ""           # optional OCR vision projector
 shell:
   confirm: true
   allowed_commands: "ls,pwd"
@@ -166,6 +192,8 @@ When only `LLM_MODEL` is set, the provider is auto-detected like
 
 - **`llm.provider`**: The AI provider to use (`ollama`, `gemini`, `openrouter`, `litertlm` or `llamacpp`).
 - **`llm.model`**: The specific model name. For `litertlm`, this is a `.litertlm` filename without extension. For `llamacpp`, this is a GGUF filename (e.g., `granite4-3b-h.Q4_K_M.gguf`).
+- **`llm.ocr_model`**: The default OCR model used by `edgebot ocr`. OCR models are still multimodal (`TYPE=ocr`, input types `text,image`), detected from GGUF metadata or the model name.
+- **`llm.ocr_mmproj`**: Optional vision projector (mmproj) for the OCR model when the filename does not match the model.
 - **`litertlm.backend`**: The LiteRT-LM inference backend (`cpu` or `gpu`, default `cpu`).
 - **`shell.confirm`**: If `true`, the application will always ask for confirmation before executing an AI-suggested command.
 - **`shell.allowed_commands`**: A comma-separated list of safe commands that the AI can execute without requiring user confirmation (e.g., "ls,pwd,date").

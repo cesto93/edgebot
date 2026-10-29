@@ -18,6 +18,7 @@ var configCmd = &cobra.Command{
 	Example: `  edgebot config
   edgebot config --provider gemini --model gemini-2.0-flash
   edgebot config --decision-model lev-1
+  edgebot config --ocr-model MiniCPM-OCR-1_0-Q4_K_M
   edgebot config --log-level debug
   edgebot config --agent plan
   edgebot config --agent-files=false
@@ -49,6 +50,9 @@ var configCmd = &cobra.Command{
 			if config.IsDecisionModel(v) {
 				cfg.LLM.DecisionModel = v
 				fmt.Printf("Note: %q is a decision model; set as the decision default (used by `edgebot decide`) instead of the chat model.\n", v)
+			} else if config.IsOCRModel(v) {
+				cfg.LLM.OCRModel = v
+				fmt.Printf("Note: %q is an OCR model; set as the OCR default (used by `edgebot ocr`) instead of the chat model.\n", v)
 			} else {
 				cfg.LLM.Model = v
 				if !fl.Changed("provider") {
@@ -72,6 +76,21 @@ var configCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("failed to reload config: %w", err)
 			}
+		}
+
+		if fl.Changed("ocr-model") {
+			v, _ := fl.GetString("ocr-model")
+			if v != "" && !config.IsOCRModel(v) {
+				return fmt.Errorf("%q is not an OCR model (pull one with 'edgebot models pull <repo> <model.gguf> [mmproj.gguf]')", v)
+			}
+			cfg.LLM.OCRModel = v
+			changed = true
+		}
+
+		if fl.Changed("ocr-mmproj") {
+			v, _ := fl.GetString("ocr-mmproj")
+			cfg.LLM.OCRMMProj = v
+			changed = true
 		}
 
 		if fl.Changed("agent") {
@@ -187,6 +206,8 @@ func init() {
 	configCmd.Flags().String("provider", "", "Set LLM provider (ollama, gemini, openrouter, litertlm)")
 	configCmd.Flags().String("model", "", "Set LLM model name")
 	configCmd.Flags().String("decision-model", "", "Set default decision model for `edgebot decide` (local System One GGUF)")
+	configCmd.Flags().String("ocr-model", "", "Set default OCR model for `edgebot ocr` (local OCR GGUF)")
+	configCmd.Flags().String("ocr-mmproj", "", "Set the vision projector (mmproj) for the OCR model")
 	configCmd.Flags().String("agent", "", "Set active agent (build, plan, chat)")
 	configCmd.Flags().Bool("agent-files", false, "Enable or disable AGENTS.md support")
 	configCmd.Flags().Bool("skills", false, "Enable or disable skills (~/.agents/skills, ./skills) support")

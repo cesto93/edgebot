@@ -162,6 +162,8 @@ func TestSaveConfigWritesDecisionModel(t *testing.T) {
 			Provider      string   `mapstructure:"provider"`
 			Model         string   `mapstructure:"model"`
 			DecisionModel string   `mapstructure:"decision_model"`
+			OCRModel      string   `mapstructure:"ocr_model"`
+			OCRMMProj     string   `mapstructure:"ocr_mmproj"`
 			InputTypes    []string `mapstructure:"input_types"`
 			ThinkEffort   string   `mapstructure:"think_effort"`
 		}{

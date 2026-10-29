@@ -38,6 +38,14 @@ func PrintConfig() {
 		decisionModel = "(not set)"
 	}
 	fmt.Printf("Decision Model: %s%s%s\n", ColorGreen, decisionModel, ColorReset)
+	ocrModel := cfg.LLM.OCRModel
+	if ocrModel == "" {
+		ocrModel = "(not set)"
+	}
+	fmt.Printf("OCR Model: %s%s%s\n", ColorGreen, ocrModel, ColorReset)
+	if cfg.LLM.OCRMMProj != "" {
+		fmt.Printf("OCR MMProj: %s%s%s\n", ColorGreen, cfg.LLM.OCRMMProj, ColorReset)
+	}
 	thinkEffort := cfg.LLM.ThinkEffort
 	if thinkEffort == "" {
 		thinkEffort = "(provider default)"
