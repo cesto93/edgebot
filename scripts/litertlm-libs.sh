@@ -9,6 +9,11 @@
 # Configuration via environment (all optional):
 #   LITERTLM_TAG        git tag/branch for prebuilt aux libs (default main)
 #   LITERTLM_VERSION    release tag for the main C-API lib (default v0.16.0)
+#                       Keep at v0.16.0: upstream paused the
+#                       litert_lm_c_api-*.zip asset from v0.17.0 (newer
+#                       runtimes ship via the litert-lm-api PyPI wheels) and
+#                       v0.19.0 introduces the ABI-breaking C API 1.0.0,
+#                       unsupported by litertlm-go v0.7.1.
 #   LITERTLM_PLAT       linux_x86_64 | linux_arm64 (default from `uname -m`)
 #   LITERTLM_PREBUILT   base URL for aux libs (default derived from tag+plat)
 #   LITERTLM_RELEASE_URL  C-API release zip URL (default derived from version)
