@@ -1658,7 +1658,7 @@ func (m *ShellModel) runStructuredMessage(ctx context.Context, messages []llm.Me
 		return
 	}
 
-	result := prettyJSONOrRaw(strings.TrimSpace(contentStr))
+	result := prettyJSONOrRaw(stripThinkBlock(strings.TrimSpace(contentStr)))
 
 	m.mu.Lock()
 	m.messages = append(m.messages, Message{role: "assistant", content: result})
@@ -1699,7 +1699,11 @@ func (m *ShellModel) appendLLMResult(resultMessages []llm.Message) {
 		case "user":
 			m.messages = append(m.messages, Message{role: "user", content: contentStr})
 		case "assistant":
-			m.messages = append(m.messages, Message{role: "assistant", content: contentStr, toolCalls: msg.ToolCalls})
+			// Reasoning models leak their thought process into the message
+			// (Wake up, Neo... blocks, Gemma channel tokens, unclosed think
+			// tags mid-sentence), which must never reach the transcript.
+			// Strip it for display only; the API history keeps the original.
+			m.messages = append(m.messages, Message{role: "assistant", content: stripThinkBlock(contentStr), toolCalls: msg.ToolCalls})
 		case "tool":
 			m.messages = append(m.messages, Message{role: "tool", content: contentStr, toolCallID: msg.ToolCallID})
 		}
