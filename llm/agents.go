@@ -260,9 +260,9 @@ var buildAgentTools = map[string]bool{
 	"RunCommand": true,
 	"WriteFile":  true,
 	"ReadFile":   true,
-	"KVSet":      true,
-	"KVGet":      true,
-	"KVList":     true,
+	"KVSet":      false,
+	"KVGet":      false,
+	"KVList":     false,
 }
 
 var planAgentTools = map[string]bool{

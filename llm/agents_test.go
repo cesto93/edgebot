@@ -328,7 +328,7 @@ func TestBuildAgentTools(t *testing.T) {
 	def := GetAgentDef("build")
 	names := toolNames(def.EnabledTools(nil))
 
-	for _, expected := range []string{"RunCommand", "WriteFile", "ReadFile", "KVSet", "KVGet", "KVList"} {
+	for _, expected := range []string{"RunCommand", "WriteFile", "ReadFile"} {
 		if !names[expected] {
 			t.Errorf("build agent should enable %s", expected)
 		}
@@ -360,8 +360,8 @@ func TestNewAgentFor(t *testing.T) {
 	}
 
 	build := NewAgentFor("build", "test-model", "ollama", nil)
-	if len(build.Tools) != 6 {
-		t.Errorf("NewAgentFor(build) returned %d tools, want 6", len(build.Tools))
+	if len(build.Tools) != 3 {
+		t.Errorf("NewAgentFor(build) returned %d tools, want 3", len(build.Tools))
 	}
 	if !strings.Contains(build.Prompt, "expert shell assistant") {
 		t.Errorf("build agent prompt missing default role, got: %s", build.Prompt)
@@ -383,7 +383,7 @@ func TestNewAgentForSessionChatSkipsContext(t *testing.T) {
 
 func TestNewAgentForUnknownFallsBackToBuild(t *testing.T) {
 	agent := NewAgentFor("nonexistent", "test-model", "ollama", nil)
-	if len(agent.Tools) != 6 {
-		t.Errorf("NewAgentFor(nonexistent) returned %d tools, want 6", len(agent.Tools))
+	if len(agent.Tools) != 3 {
+		t.Errorf("NewAgentFor(nonexistent) returned %d tools, want 3", len(agent.Tools))
 	}
 }
