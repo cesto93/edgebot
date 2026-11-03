@@ -42,6 +42,17 @@ func OpenDecisionModel(libDir, modelPath string, opts decide.Options) (*decide.D
 		if strings.Contains(err.Error(), "has no decision type") {
 			return nil, fmt.Errorf("decide: %s is not a decision model (no decision metadata in GGUF): %w", modelPath, err)
 		}
+		if from, to, ok := shimFromError(err); ok {
+			shimPath, shimErr := shimDecisionModel(modelPath, from, to)
+			if shimErr != nil {
+				return nil, fmt.Errorf("decide: %w (shim: %v)", err, shimErr)
+			}
+			if shimmed, shimErr := decide.Open(shimPath, opts); shimErr == nil {
+				return shimmed, nil
+			} else {
+				return nil, fmt.Errorf("decide: %w", shimErr)
+			}
+		}
 		return nil, fmt.Errorf("decide: %w", err)
 	}
 	return d, nil
