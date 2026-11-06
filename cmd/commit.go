@@ -166,17 +166,11 @@ Only output the commit message, nothing else.`,
 
 	slog.Debug("timing", "llm", llmDuration)
 
-	if len(resultMessages) == 0 {
-		return fmt.Errorf("no response from LLM")
+	msg, err := lastAssistantText(resultMessages)
+	if err != nil {
+		return err
 	}
 
-	lastMsg := resultMessages[len(resultMessages)-1]
-	content, ok := lastMsg.Content.(string)
-	if !ok || strings.TrimSpace(content) == "" {
-		return fmt.Errorf("empty response from LLM")
-	}
-
-	msg := strings.TrimSpace(content)
 	msg = stripThinkBlock(msg)
 	msg = stripCodeFences(msg)
 

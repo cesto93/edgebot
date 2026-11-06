@@ -135,19 +135,29 @@ func (l *LlamacppCaller) ensureInit() error {
 	return l.initErr
 }
 
-func (l *LlamacppCaller) buildPrompt(systemPrompt string, messages []Message) (string, error) {
+// buildChatMessages assembles the chat-template messages from an optional
+// system prompt plus the conversation. Tool messages get a "Tool result"
+// prefix, and format converts a message's content into template text (the
+// vision path also uses it to collect decoded image payloads in marker order).
+func buildChatMessages(systemPrompt string, messages []Message, format func(any) (string, [][]byte)) []llama.ChatMessage {
 	chatMsgs := make([]llama.ChatMessage, 0, 1+len(messages))
 	if systemPrompt != "" {
 		chatMsgs = append(chatMsgs, llama.NewChatMessage("system", systemPrompt))
 	}
 	for _, msg := range messages {
-		content := formatContent(msg.Content)
+		content, _ := format(msg.Content)
 		if msg.Role == "tool" {
 			content = "Tool result (" + msg.ToolCallID + "): " + content
 		}
 		chatMsgs = append(chatMsgs, llama.NewChatMessage(msg.Role, content))
 	}
+	return chatMsgs
+}
 
+func (l *LlamacppCaller) buildPrompt(systemPrompt string, messages []Message) (string, error) {
+	chatMsgs := buildChatMessages(systemPrompt, messages, func(content any) (string, [][]byte) {
+		return formatContent(content), nil
+	})
 	prompt := l.applyChatTemplate(chatMsgs, true)
 	if prompt == "" {
 		return "", fmt.Errorf("chat template returned empty prompt")
@@ -166,20 +176,13 @@ type visionInput struct {
 // inserting the mtmd media marker at each image's position and collecting the
 // decoded image bytes.
 func (l *LlamacppCaller) buildVisionPrompt(systemPrompt string, messages []Message) (*visionInput, error) {
-	chatMsgs := make([]llama.ChatMessage, 0, 1+len(messages))
-	if systemPrompt != "" {
-		chatMsgs = append(chatMsgs, llama.NewChatMessage("system", systemPrompt))
-	}
 	marker := mtmd.DefaultMarker()
 	var images [][]byte
-	for _, msg := range messages {
-		content, imgs := formatVisionContent(msg.Content, marker)
+	chatMsgs := buildChatMessages(systemPrompt, messages, func(content any) (string, [][]byte) {
+		text, imgs := formatVisionContent(content, marker)
 		images = append(images, imgs...)
-		if msg.Role == "tool" {
-			content = "Tool result (" + msg.ToolCallID + "): " + content
-		}
-		chatMsgs = append(chatMsgs, llama.NewChatMessage(msg.Role, content))
-	}
+		return text, imgs
+	})
 
 	prompt := l.applyChatTemplate(chatMsgs, true)
 	if prompt == "" {

@@ -307,6 +307,13 @@ func normalizeThinkEffort(s string) string {
 
 var getConfigPathFunc = getConfigPath
 
+// ConfigDir returns the edgebot user-config directory (os.UserConfigDir()
+// joined with "edgebot"), creating it if necessary. Shared with the stats and
+// tools packages for their DB paths.
+func ConfigDir() (string, error) {
+	return getConfigPath()
+}
+
 func getConfigPath() (string, error) {
 	userConfigDir, err := os.UserConfigDir()
 	if err != nil {

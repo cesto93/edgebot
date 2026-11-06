@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sort"
 	"time"
+
+	"edgebot/config"
 
 	"go.etcd.io/bbolt"
 )
@@ -38,12 +39,8 @@ type Entry struct {
 var dbPathFunc = getDBPath
 
 func getDBPath() (string, error) {
-	userConfigDir, err := os.UserConfigDir()
+	configPath, err := config.ConfigDir()
 	if err != nil {
-		return "", err
-	}
-	configPath := filepath.Join(userConfigDir, "edgebot")
-	if err := os.MkdirAll(configPath, 0755); err != nil {
 		return "", err
 	}
 	return filepath.Join(configPath, "usage.db"), nil

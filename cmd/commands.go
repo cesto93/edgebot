@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -107,17 +106,12 @@ func runCustomCommand(cfg *config.Config, name string, extraArgs []string) error
 
 	slog.Debug("timing", "llm", llmDuration)
 
-	if len(resultMessages) == 0 {
-		return fmt.Errorf("no response from LLM")
+	responseStr, err := lastAssistantText(resultMessages)
+	if err != nil {
+		return err
 	}
 
-	lastMsg := resultMessages[len(resultMessages)-1]
-	responseStr, ok := lastMsg.Content.(string)
-	if !ok || strings.TrimSpace(responseStr) == "" {
-		return fmt.Errorf("empty response from LLM")
-	}
-
-	fmt.Println(strings.TrimSpace(responseStr))
+	fmt.Println(responseStr)
 	return nil
 }
 
@@ -162,17 +156,12 @@ func runStructuredCommand(cfg *config.Config, cmd *config.CommandInfo, args []st
 
 	slog.Debug("timing", "llm", llmDuration)
 
-	if len(resultMessages) == 0 {
-		return fmt.Errorf("no response from LLM")
+	contentStr, err := lastAssistantText(resultMessages)
+	if err != nil {
+		return err
 	}
 
-	lastMsg := resultMessages[len(resultMessages)-1]
-	contentStr, ok := lastMsg.Content.(string)
-	if !ok || strings.TrimSpace(contentStr) == "" {
-		return fmt.Errorf("empty response from LLM")
-	}
-
-	result := prettyJSONOrRaw(strings.TrimSpace(contentStr))
+	result := prettyJSONOrRaw(contentStr)
 
 	if commandOutput != "" {
 		if err := os.WriteFile(commandOutput, []byte(result+"\n"), 0644); err != nil {

@@ -1,0 +1,11 @@
+{
+  "min-tokens": 50,
+  "reporters": ["consoleFull"],
+  "gitignore": true,
+  "ignore": [
+    "**/.git/**",
+    "**/vendor/**",
+    "service/proto/**",
+    "**/*_test.go"
+  ]
+}

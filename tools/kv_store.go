@@ -2,11 +2,12 @@ package tools
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"edgebot/config"
 
 	"go.etcd.io/bbolt"
 )
@@ -17,12 +18,8 @@ func getDBPath() (string, error) {
 	if dbPathOverride != "" {
 		return dbPathOverride, nil
 	}
-	userConfigDir, err := os.UserConfigDir()
+	configPath, err := config.ConfigDir()
 	if err != nil {
-		return "", err
-	}
-	configPath := filepath.Join(userConfigDir, "edgebot")
-	if err := os.MkdirAll(configPath, 0755); err != nil {
 		return "", err
 	}
 	return filepath.Join(configPath, "kv_store.db"), nil
