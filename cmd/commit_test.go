@@ -3,52 +3,12 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 )
-
-type modelsResponse struct {
-	Data []struct {
-		ID string `json:"id"`
-	} `json:"data"`
-}
-
-func requireProvider(t *testing.T, baseURL, model string) {
-	t.Helper()
-	client := http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(strings.TrimRight(baseURL, "/") + "/v1/models")
-	if err != nil {
-		t.Skipf("%s unreachable: %v", baseURL, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Skipf("%s returned status %d", baseURL, resp.StatusCode)
-	}
-	var mr modelsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&mr); err != nil {
-		t.Skipf("%s returned invalid JSON: %v", baseURL, err)
-	}
-	if len(mr.Data) == 0 {
-		t.Skipf("provider at %s returned no models", baseURL)
-	}
-	for _, m := range mr.Data {
-		if m.ID == model {
-			return
-		}
-	}
-	var names []string
-	for _, m := range mr.Data {
-		names = append(names, m.ID)
-	}
-	t.Fatalf("model %q not found at %s; available: %s (set TEST_MODEL to override)", model, baseURL, strings.Join(names, ", "))
-}
 
 func mockGitExecCommand(diffPath string) func(string, ...string) *exec.Cmd {
 	return func(command string, args ...string) *exec.Cmd {
@@ -75,49 +35,21 @@ func mockGitExecCommand(diffPath string) func(string, ...string) *exec.Cmd {
 }
 
 func TestRunCommitWithRealLLM(t *testing.T) {
+	// The commit command runs locally against the llm model in
+	// ~/.edgebot/models/llamacpp (see integration_llamacpp_test.go).
 	tests := []struct {
-		name       string
-		provider   string
-		model      string
-		envVar     string
-		defaultURL string
+		name  string
+		model string
 	}{
 		{
-			name:       "ollama-granite4-350m",
-			provider:   "ollama",
-			model:      "granite4:350m",
-			envVar:     "OLLAMA_HOST",
-			defaultURL: "http://localhost:11434",
-		},
-		{
-			name:       "ollama-granite4-350m-h",
-			provider:   "ollama",
-			model:      "granite4:350m-h",
-			envVar:     "OLLAMA_HOST",
-			defaultURL: "http://localhost:11434",
-		},
-		{
-			name:       "ollama-gemma3-270m",
-			provider:   "ollama",
-			model:      "gemma3:270m",
-			envVar:     "OLLAMA_HOST",
-			defaultURL: "http://localhost:11434",
+			name:  "llamacpp-" + integrationLLMModel,
+			model: integrationLLMModel,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			baseURL := os.Getenv(tt.envVar)
-			if baseURL == "" {
-				baseURL = tt.defaultURL
-			}
-
-			model := tt.model
-			if m := os.Getenv("TEST_MODEL"); m != "" {
-				model = m
-			}
-
-			requireProvider(t, baseURL, model)
+			requireLlamacppModel(t, tt.model)
 
 			tmpDir := t.TempDir()
 
@@ -134,14 +66,11 @@ func TestRunCommitWithRealLLM(t *testing.T) {
 			os.Chdir(tmpDir)
 			defer os.Chdir(origDir)
 
-			os.Setenv(tt.envVar, baseURL)
-			defer os.Unsetenv(tt.envVar)
-
 			origExecCommand := execCommand
 			execCommand = mockGitExecCommand(diffPath)
 			defer func() { execCommand = origExecCommand }()
 
-			configYAML := fmt.Sprintf("llm:\n  provider: %s\n  model: %s\n", tt.provider, model)
+			configYAML := fmt.Sprintf("llm:\n  provider: llamacpp\n  model: %s\n", tt.model)
 			if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), []byte(configYAML), 0644); err != nil {
 				t.Fatal(err)
 			}

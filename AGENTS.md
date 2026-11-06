@@ -54,9 +54,12 @@ Logging uses `log/slog`; call `config.InitLogger(cfg.LogLevel)` after `LoadConfi
 go test ./...
 go test -v -run TestName ./package
 go test -cover ./...
+go test -tags=integration -v -run TestName ./cmd
 ```
 
 Conventions: table-driven tests, `t.Run()` subtests, function variable mocking (`userConfigDirFunc`, `loadEnvFunc`, `dbPathFunc`).
+
+Integration tests (`//go:build integration`, `go test -tags=integration ./cmd`) run the real inference stack only against the three local llamacpp models (`cmd/integration_llamacpp_test.go` constants: `integrationLLMModel` = LFM3-1.7B-QAD-Q4_0, `integrationOCRModel` = MiniCPM-OCR-1_0-Q4_K_M, `integrationDecisionModel` = d1-2B-Q4_K_M): `requireLlamacppModel` fails with an actionable message when a GGUF is missing from `~/.edgebot/models/llamacpp/`. `TestRunCommitWithRealLLM` and `TestRunStructuredCommandWithRealLLM` exercise the llm model (commit + GBNF structured extraction); `TestRunOCRWithRealModel` renders a synthetic digits PNG (`writeOCRTestImage`) and runs the OCR model with its MiniCPM mmproj (`requireOCRMMProj`: `llm.ocr_mmproj` > mmproj-model-f16-4x.gguf, skipping the d1 projector); `TestRunDecideWithRealModel` runs the decision GGUF in a `go run .` **subprocess** and `t.Fatalf`s on any failure — the lfm3-d1 decision type is unsupported on the previous yzma version (known bug), so the test fails (not skips) until a yzma upgrade fixes it.
 
 ## TUI conventions (cmd/shell.go)
 

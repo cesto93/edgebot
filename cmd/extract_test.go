@@ -12,19 +12,15 @@ import (
 )
 
 func TestRunStructuredCommandWithRealLLM(t *testing.T) {
+	// The structured command runs locally against the llm model in
+	// ~/.edgebot/models/llamacpp (see integration_llamacpp_test.go).
 	tests := []struct {
-		name       string
-		provider   string
-		model      string
-		envVar     string
-		defaultURL string
+		name  string
+		model string
 	}{
 		{
-			name:       "ollama",
-			provider:   "ollama",
-			model:      "granite4:350m",
-			envVar:     "OLLAMA_HOST",
-			defaultURL: "http://localhost:11434",
+			name:  "llamacpp-" + integrationLLMModel,
+			model: integrationLLMModel,
 		},
 	}
 
@@ -44,17 +40,7 @@ Total: $1,234.56`
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			baseURL := os.Getenv(tt.envVar)
-			if baseURL == "" {
-				baseURL = tt.defaultURL
-			}
-
-			model := tt.model
-			if m := os.Getenv("TEST_MODEL"); m != "" {
-				model = m
-			}
-
-			requireProvider(t, baseURL, model)
+			requireLlamacppModel(t, tt.model)
 
 			tmpDir := t.TempDir()
 
@@ -65,15 +51,7 @@ Total: $1,234.56`
 			os.Chdir(tmpDir)
 			defer os.Chdir(origDir)
 
-			os.Setenv(tt.envVar, baseURL)
-			defer os.Unsetenv(tt.envVar)
-
 			if err := os.WriteFile(filepath.Join(tmpDir, "invoice.txt"), []byte(input), 0644); err != nil {
-				t.Fatal(err)
-			}
-
-			schemaPath := filepath.Join(tmpDir, "schema.json")
-			if err := os.WriteFile(schemaPath, []byte(schema), 0644); err != nil {
 				t.Fatal(err)
 			}
 
@@ -81,12 +59,17 @@ Total: $1,234.56`
 			if err := os.MkdirAll(commandsDir, 0755); err != nil {
 				t.Fatal(err)
 			}
-			cmdContent := fmt.Sprintf("---\ndescription: Extract invoice data\nschema: %s\n---\nExtract structured data from the invoice.\n", schemaPath)
+
+			schemaPath := filepath.Join(commandsDir, "schema.json")
+			if err := os.WriteFile(schemaPath, []byte(schema), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cmdContent := "---\ndescription: Extract invoice data\nschema: schema.json\n---\nExtract structured data from the invoice.\n"
 			if err := os.WriteFile(filepath.Join(commandsDir, "invoice.md"), []byte(cmdContent), 0644); err != nil {
 				t.Fatal(err)
 			}
 
-			configYAML := fmt.Sprintf("llm:\n  provider: %s\n  model: %s\n", tt.provider, model)
+			configYAML := fmt.Sprintf("llm:\n  provider: llamacpp\n  model: %s\n", tt.model)
 			if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), []byte(configYAML), 0644); err != nil {
 				t.Fatal(err)
 			}
