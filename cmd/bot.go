@@ -324,7 +324,7 @@ func (e *botExecutor) ExecuteTool(call llm.ToolCall) (string, error) {
 }
 
 func (e *botExecutor) IsAllowedCommand(cmd string) bool {
-	return config.IsAllowedCommand(config.GetCommandName(cmd), e.cfg.Shell.AllowedCommands)
+	return config.IsAllowedCommand(cmd, e.cfg.Shell.AllowedCommands)
 }
 
 func (e *botExecutor) AskConfirmation(cmd string) bool {

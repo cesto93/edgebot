@@ -119,6 +119,6 @@ func Chat(ctx context.Context, req ChatRequest) ([]llm.Message, error) {
 	if err != nil {
 		return nil, ErrUnavailable
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	return c.Chat(ctx, req)
 }

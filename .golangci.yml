@@ -1,0 +1,38 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  settings:
+    errcheck:
+      # Failing to close a reader/handle at the end of a function has no
+      # recovery path here; the write paths that matter are checked explicitly.
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*os.File).Close
+        - (*go.etcd.io/bbolt.DB).Close
+        - (*os.Process).Kill
+    staticcheck:
+      # all checks except the QF (quickfix/style) class: QF1012 et al. are
+      # preferences about fmt.Fprintf vs WriteString, not defects.
+      checks:
+        - all
+        - -QF*
+        - -ST*
+  exclusions:
+    rules:
+      # Test helpers print and clean up without checking every error.
+      - path: _test\.go
+        linters:
+          - errcheck
+      # CLI table/prompt output: a failed write to stdout is not actionable.
+      - path: cmd/
+        linters:
+          - errcheck
+        text: "Error return value of `(fmt\\.|os\\.(Remove|RemoveAll|Setenv|Unsetenv|Chdir)|w\\.)"

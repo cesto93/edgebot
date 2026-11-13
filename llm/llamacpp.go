@@ -501,7 +501,9 @@ func (l *LlamacppCaller) initialize() error {
 	}
 
 	llama.LogSet(llama.LogSilent())
-	llama.Init()
+	if err := llama.Init(); err != nil {
+		return fmt.Errorf("failed to initialize llama backend: %w", err)
+	}
 
 	modelPath := filepath.Join(l.modelDir, l.Model)
 	if _, err := os.Stat(modelPath); os.IsNotExist(err) {
@@ -531,7 +533,7 @@ func (l *LlamacppCaller) initialize() error {
 	slog.Debug("llamacpp: creating context")
 	lctx, err := llama.InitFromModel(llm, ctxParams)
 	if err != nil {
-		llama.ModelFree(llm)
+		_ = llama.ModelFree(llm)
 		return fmt.Errorf("failed to create context: %w", err)
 	}
 	l.lctx = lctx

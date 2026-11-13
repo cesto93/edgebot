@@ -191,10 +191,14 @@ Only output the commit message, nothing else.`,
 	defer os.Remove(tmpFile.Name())
 
 	if _, err := tmpFile.WriteString(msg); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return fmt.Errorf("failed to write commit message: %w", err)
 	}
-	tmpFile.Close()
+	// A close error here means the message may be truncated on disk, which
+	// would commit a partial message: surface it instead of ignoring it.
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close commit message file: %w", err)
+	}
 
 	gitCommit := execCommand("git", "commit", "-F", tmpFile.Name())
 	gitCommit.Stdout = os.Stdout
@@ -426,9 +430,7 @@ func stripThinkBlock(s string) string {
 	s = gemmaSentinelRe.ReplaceAllString(s, "")
 	// Some Gemma outputs carry a bare "thought" channel label even without
 	// thinking delimiters; strip it when it prefixes the whole output.
-	if strings.HasPrefix(s, "thought\n") {
-		s = strings.TrimPrefix(s, "thought\n")
-	}
+	s = strings.TrimPrefix(s, "thought\n")
 	return strings.TrimSpace(s)
 }
 

@@ -35,7 +35,9 @@ func OpenDecisionModel(libDir, modelPath string, opts decide.Options) (*decide.D
 		return nil, fmt.Errorf("decide: failed to load llama library from %s: %w", libDir, err)
 	}
 	llama.LogSet(llama.LogSilent())
-	llama.Init()
+	if err := llama.Init(); err != nil {
+		return nil, fmt.Errorf("decide: failed to initialize llama backend: %w", err)
+	}
 
 	d, err := decide.Open(modelPath, opts)
 	if err != nil {

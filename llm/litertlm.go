@@ -87,7 +87,7 @@ func (l *LitertLMCaller) call(ctx context.Context, systemPrompt string, messages
 	if err != nil {
 		return nil, fmt.Errorf("litertlm: new chat: %w", err)
 	}
-	defer chat.Close()
+	defer func() { _ = chat.Close() }()
 
 	reply, err := l.sendUserTurn(ctx, chat, messages[len(messages)-1])
 	if err != nil {
@@ -162,11 +162,6 @@ func (l *LitertLMCaller) dispatch(ctx context.Context, chat *litertlm.Chat, repl
 			})
 			if toolErr != nil {
 				result = fmt.Sprintf("Error: %v", toolErr)
-				if result == "" {
-					result = toolErr.Error()
-				} else if output := strings.TrimSpace(result); output != "" {
-					// keep combined error+output already
-				}
 			}
 			slog.Debug("litertlm: tool result", "tool", call.Function.Name)
 			var execErr error

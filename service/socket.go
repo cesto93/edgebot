@@ -48,7 +48,7 @@ func IsActive() bool {
 	if err != nil {
 		return false
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, err = c.Ping(ctx)

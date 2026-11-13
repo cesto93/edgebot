@@ -96,7 +96,9 @@ func runSkills() error {
 		}
 		fmt.Fprintln(w)
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("failed to write skills table: %w", err)
+	}
 
 	return nil
 }

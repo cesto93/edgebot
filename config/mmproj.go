@@ -73,20 +73,20 @@ func saveMMProjLinks(dir string, links map[string]string) error {
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("write vision projector links: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("close vision projector links: %w", err)
 	}
 	if err := os.Chmod(tmpName, 0o644); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("chmod vision projector links: %w", err)
 	}
 	if err := os.Rename(tmpName, filepath.Join(dir, mmprojLinkFile)); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("save vision projector links: %w", err)
 	}
 	return nil

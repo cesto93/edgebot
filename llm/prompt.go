@@ -61,7 +61,9 @@ func writePromptFile(dir, name, prompt string) {
 	if _, err := os.Stat(dest); err == nil {
 		return
 	}
-	os.WriteFile(dest, []byte(prompt), 0o644)
+	if err := os.WriteFile(dest, []byte(prompt), 0o644); err != nil {
+		slog.Warn("failed to write prompt file", "path", dest, "err", err)
+	}
 }
 
 // readBotPromptFile reads BOTPROMPT.md from ~/.edgebot/BOTPROMPT.md.

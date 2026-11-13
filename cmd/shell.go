@@ -31,9 +31,6 @@ var (
 	userStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF"))
 
-	aiStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00BFFF"))
-
 	errorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFD700"))
 
@@ -129,7 +126,7 @@ func (e *ShellExecutorForLLM) ExecuteTool(call llm.ToolCall) (string, error) {
 			if !e.m.cfg.Shell.Confirm {
 				return true
 			}
-			if config.IsAllowedCommand(config.GetCommandName(cmd), e.m.cfg.Shell.AllowedCommands) {
+			if config.IsAllowedCommand(cmd, e.m.cfg.Shell.AllowedCommands) {
 				return true
 			}
 			return e.AskConfirmation(cmd)
@@ -190,7 +187,7 @@ func (e *ShellExecutorForLLM) toolActionMessage(call llm.ToolCall) string {
 }
 
 func (e *ShellExecutorForLLM) IsAllowedCommand(cmd string) bool {
-	return config.IsAllowedCommand(config.GetCommandName(cmd), e.m.cfg.Shell.AllowedCommands)
+	return config.IsAllowedCommand(cmd, e.m.cfg.Shell.AllowedCommands)
 }
 
 func (e *ShellExecutorForLLM) AskConfirmation(cmd string) bool {
@@ -504,9 +501,9 @@ func (m *ShellModel) scrollTranscript(dir int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if dir < 0 {
-		m.viewport.HalfViewUp()
+		m.viewport.HalfPageUp()
 	} else {
-		m.viewport.HalfViewDown()
+		m.viewport.HalfPageDown()
 	}
 	m.followOutput = m.viewport.AtBottom()
 	return m, nil

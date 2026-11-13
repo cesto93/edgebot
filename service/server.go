@@ -168,7 +168,7 @@ func (e *ServiceExecutor) ExecuteTool(call llm.ToolCall) (string, error) {
 }
 
 func (e *ServiceExecutor) IsAllowedCommand(cmd string) bool {
-	return config.IsAllowedCommand(config.GetCommandName(cmd), e.allowed)
+	return config.IsAllowedCommand(cmd, e.allowed)
 }
 
 func (e *ServiceExecutor) AskConfirmation(cmd string) bool {

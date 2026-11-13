@@ -346,7 +346,7 @@ func downloadFile(repo, filename string) error {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}
 	cleanup := func() {
-		out.Close()
+		_ = out.Close()
 		if rmErr := os.Remove(destPath); rmErr != nil && !os.IsNotExist(rmErr) {
 			slog.Warn("failed to remove partial file", "path", destPath, "err", rmErr)
 		}

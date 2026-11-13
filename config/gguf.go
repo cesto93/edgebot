@@ -1,10 +1,12 @@
 package config
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"regexp"
 	"strings"
@@ -63,6 +65,11 @@ func IsOCRModelFile(path string) bool {
 const ggufMaxKV = 100000
 const ggufMaxBytes = 64 << 20
 
+// ggufReadBufferSize is the read buffer used by the metadata scanner. Most
+// skipped metadata is a tokenizer array of small length-prefixed strings, so a
+// buffered reader serves them without a syscall per entry.
+const ggufReadBufferSize = 64 << 10
+
 // GGUF metadata value types (https://github.com/ggerganov/ggml/blob/master/docs/gguf.md).
 const (
 	ggufTypeString = 8
@@ -100,7 +107,7 @@ func ggufStringValues(path string, keys ...string) (map[string]string, error) {
 	}
 	out := make(map[string]string, len(keys))
 
-	r := &ggufReader{r: f}
+	r := newGGUFReader(f)
 	if magic := r.uint32(); magic != 0x46554747 { // "GGUF" little-endian
 		return nil, fmt.Errorf("not a GGUF file")
 	}
@@ -145,7 +152,7 @@ func ggufHasKeySuffix(path, suffix string) (bool, error) {
 	}
 	defer f.Close()
 
-	r := &ggufReader{r: f}
+	r := newGGUFReader(f)
 	if magic := r.uint32(); magic != 0x46554747 { // "GGUF" little-endian
 		return false, fmt.Errorf("not a GGUF file")
 	}
@@ -175,13 +182,21 @@ func ggufHasKeySuffix(path, suffix string) (bool, error) {
 	return false, nil
 }
 
-// ggufReader reads GGUF primitives from the start of a file, skipping values
-// via Seek so large arrays (e.g. tokenizer lists) cost no memory.
+// ggufReader reads GGUF primitives from the start of a file, discarding values
+// through a buffered reader so large arrays (e.g. tokenizer lists) cost no
+// memory. The buffer matters: tokenizer metadata holds hundreds of thousands
+// of length-prefixed strings, and seeking once per entry made listing the
+// models dir take ~2s (one Seek per token); buffered discards make it
+// microseconds.
 type ggufReader struct {
-	r   *os.File
+	r   *bufio.Reader
 	err error
 	// used counts every byte consumed or skipped, bounding corrupt files.
 	used uint64
+}
+
+func newGGUFReader(f *os.File) *ggufReader {
+	return &ggufReader{r: bufio.NewReaderSize(f, ggufReadBufferSize)}
 }
 
 func (g *ggufReader) fail(err error) {
@@ -233,16 +248,22 @@ func (g *ggufReader) bytes(n uint64) []byte {
 	return buf
 }
 
-// skip discards n bytes via Seek without allocating.
+// skip discards n bytes without allocating. Discard refills the buffer in
+// ggufReadBufferSize chunks, which keeps metadata scans away from the syscall
+// path; large skips stay bounded by ggufMaxBytes.
 func (g *ggufReader) skip(n uint64) {
-	if g.err != nil {
+	if g.err != nil || n == 0 {
 		return
 	}
 	if n > ggufMaxBytes-g.used {
 		g.fail(fmt.Errorf("metadata entry too large (%d bytes)", n))
 		return
 	}
-	if _, err := g.r.Seek(int64(n), io.SeekCurrent); err != nil {
+	if n > uint64(math.MaxInt) {
+		g.fail(fmt.Errorf("metadata entry too large (%d bytes)", n))
+		return
+	}
+	if _, err := g.r.Discard(int(n)); err != nil {
 		g.fail(err)
 		return
 	}

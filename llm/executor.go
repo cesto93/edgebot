@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"edgebot/config"
 	"edgebot/tools"
 )
 
@@ -111,31 +112,12 @@ func NewConfirmPolicy(confirm bool, allowedCommands []string) *ToolExecutorPolic
 			if !confirm {
 				return true
 			}
-			return IsAllowedCommandForPolicy(cmd, allowedCommands)
+			return config.IsAllowedCommand(cmd, allowedCommands)
 		},
 		ConfirmWriteFile: func(path string) bool {
 			return !confirm
 		},
 	}
-}
-
-// IsAllowedCommandForPolicy is a helper for NewConfirmPolicy.
-func IsAllowedCommandForPolicy(cmd string, allowed []string) bool {
-	if len(allowed) == 0 {
-		return false
-	}
-	trim := strings.TrimSpace(cmd)
-	name := trim
-	if idx := strings.Index(trim, " "); idx != -1 {
-		name = trim[:idx]
-	}
-	name = strings.TrimSpace(name)
-	for _, a := range allowed {
-		if strings.TrimSpace(a) == name {
-			return true
-		}
-	}
-	return false
 }
 
 // NoopExecutor is a ToolExecutor that runs nothing and allows everything.

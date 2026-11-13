@@ -2,6 +2,7 @@ package stats
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"edgebot/config"
 
 	"go.etcd.io/bbolt"
+	berrors "go.etcd.io/bbolt/errors"
 )
 
 // Usage is the token usage reported for a single LLM call.
@@ -146,7 +148,7 @@ func Reset() error {
 	}
 	defer db.Close()
 	return db.Update(func(tx *bbolt.Tx) error {
-		if err := tx.DeleteBucket([]byte("usage")); err == bbolt.ErrBucketNotFound {
+		if err := tx.DeleteBucket([]byte("usage")); errors.Is(err, berrors.ErrBucketNotFound) {
 			return nil
 		} else {
 			return err

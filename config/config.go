@@ -945,7 +945,7 @@ func SelectModel() error {
 	fmt.Printf("\nEnter number to select model (or press Enter to cancel): ")
 
 	var input string
-	fmt.Scanln(&input)
+	_, _ = fmt.Scanln(&input)
 	input = strings.TrimSpace(input)
 
 	if input == "" {
@@ -973,19 +973,6 @@ func SelectModel() error {
 	return nil
 }
 
-func IsAllowedCommand(cmd string, allowedList []string) bool {
-	if len(allowedList) == 0 {
-		return false
-	}
-	for _, a := range allowedList {
-		a = strings.TrimSpace(a)
-		if a == cmd {
-			return true
-		}
-	}
-	return false
-}
-
 // GetCommandName returns the first word of a shell command string.
 func GetCommandName(cmd string) string {
 	parts := strings.Fields(cmd)
@@ -1008,8 +995,6 @@ func GetEnvPaths() []string {
 
 	return paths
 }
-
-var getUserConfigDirFunc = os.UserConfigDir
 
 func LoadCommands(cfg *Config) []CommandInfo {
 	var fileCmds []CommandInfo

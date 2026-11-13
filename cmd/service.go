@@ -79,7 +79,7 @@ func stopService() error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to service: %w", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := c.Stop(ctx); err != nil {

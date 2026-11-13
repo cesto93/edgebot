@@ -90,7 +90,10 @@ func runAgents(cmd *cobra.Command) error {
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", marker, def.Name, def.Description, tools)
 	}
-	w.Flush()
+	// A flush failure means the table may be truncated; report it.
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("failed to write agents table: %w", err)
+	}
 
 	return nil
 }

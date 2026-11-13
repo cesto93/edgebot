@@ -36,6 +36,14 @@ install-litertlm:
 coverage:
 	go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
+lint:
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run
+dup:
+	jscpd .
+check:
+	gofmt -l .
+	go vet ./...
+	go test -race ./...
 integration:
 	go test -tags=integration -v ./cmd/
 docker-build:
