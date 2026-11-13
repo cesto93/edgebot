@@ -114,69 +114,87 @@ func TestIsOCRModelFile(t *testing.T) {
 }
 
 func TestGetLlamacppModelsOCRType(t *testing.T) {
-	mockOCRDirs(t)
+	t.Run("unlinked projector grants no image input", func(t *testing.T) {
+		mockOCRDirs(t)
 
-	byName := map[string]ModelInfo{}
-	for _, m := range GetLlamacppModels() {
-		byName[m.Name] = m
-	}
-	ocr, ok := byName["MiniCPM-OCR-1_0-Q4_K_M"]
-	if !ok {
-		t.Fatalf("OCR model missing from GetLlamacppModels(): %+v", byName)
-	}
-	if got := ocr.ModelType(); got != ModelTypeOCR {
-		t.Errorf("OCR ModelType() = %q, want %q", got, ModelTypeOCR)
-	}
-	if !contains(ocr.InputTypes, "image") {
-		t.Errorf("OCR InputTypes = %v, want image via the unique projector", ocr.InputTypes)
-	}
-	plain := byName["plain-vl"]
-	if got := plain.ModelType(); got != ModelTypeLLM {
-		t.Errorf("plain ModelType() = %q, want %q", got, ModelTypeLLM)
-	}
-	if contains(plain.InputTypes, "image") {
-		t.Errorf("plain InputTypes = %v, want text only (projector is not paired)", plain.InputTypes)
-	}
+		byName := map[string]ModelInfo{}
+		for _, m := range GetLlamacppModels() {
+			byName[m.Name] = m
+		}
+		ocr, ok := byName["MiniCPM-OCR-1_0-Q4_K_M"]
+		if !ok {
+			t.Fatalf("OCR model missing from GetLlamacppModels(): %+v", byName)
+		}
+		if got := ocr.ModelType(); got != ModelTypeOCR {
+			t.Errorf("OCR ModelType() = %q, want %q", got, ModelTypeOCR)
+		}
+		if contains(ocr.InputTypes, "image") {
+			t.Errorf("OCR InputTypes = %v, want text only until a projector is linked", ocr.InputTypes)
+		}
+	})
+
+	t.Run("linked projector grants image input", func(t *testing.T) {
+		mockOCRDirs(t)
+		if err := SaveMMProjLink("MiniCPM-OCR-1_0-Q4_K_M", "mmproj-model-f16-4x"); err != nil {
+			t.Fatalf("SaveMMProjLink() = %v", err)
+		}
+
+		byName := map[string]ModelInfo{}
+		for _, m := range GetLlamacppModels() {
+			byName[m.Name] = m
+		}
+		ocr := byName["MiniCPM-OCR-1_0-Q4_K_M"]
+		if !contains(ocr.InputTypes, "image") {
+			t.Errorf("OCR InputTypes = %v, want image (projector is linked)", ocr.InputTypes)
+		}
+		plain := byName["plain-vl"]
+		if got := plain.ModelType(); got != ModelTypeLLM {
+			t.Errorf("plain ModelType() = %q, want %q", got, ModelTypeLLM)
+		}
+		if contains(plain.InputTypes, "image") {
+			t.Errorf("plain InputTypes = %v, want text only (no link)", plain.InputTypes)
+		}
+	})
 }
 
-func TestFindLlamacppMMProjForModel(t *testing.T) {
-	t.Run("unique fallback", func(t *testing.T) {
-		mockOCRDirs(t)
-		got, err := FindLlamacppMMProjForModel("MiniCPM-OCR-1_0-Q4_K_M")
-		if err != nil {
-			t.Fatalf("FindLlamacppMMProjForModel() = %v", err)
-		}
-		if filepath.Base(got) != "mmproj-model-f16-4x.gguf" {
-			t.Errorf("projector = %q, want mmproj-model-f16-4x.gguf", got)
-		}
+func TestGetLlamacppModelsUsesLinks(t *testing.T) {
+	dir := mockOCRDirs(t)
+	writeTestGGUF(t, filepath.Join(dir, "LFM3-1.7B-QAD-Q4_0.gguf"), []ggufKV{
+		{"general.architecture", ggufTypeString, ggufStr("lfm3")},
+		{"general.name", ggufTypeString, ggufStr("LFM3 1.7B")},
 	})
+	writeTestGGUF(t, filepath.Join(dir, "d1-2B-Q4_K_M.gguf"), []ggufKV{
+		{"general.architecture", ggufTypeString, ggufStr("lfm2")},
+		{"general.name", ggufTypeString, ggufStr("d1 2B")},
+	})
+	writeTestGGUF(t, filepath.Join(dir, "mmproj-d1-2B-Q8_0.gguf"), []ggufKV{
+		{"general.name", ggufTypeString, ggufStr("d1 vision projector")},
+	})
+	for _, link := range [][2]string{
+		{"MiniCPM-OCR-1_0-Q4_K_M", "mmproj-model-f16-4x"},
+		{"d1-2B-Q4_K_M", "mmproj-d1-2B-Q8_0"},
+	} {
+		if err := SaveMMProjLink(link[0], link[1]); err != nil {
+			t.Fatalf("SaveMMProjLink(%v) = %v", link, err)
+		}
+	}
 
-	t.Run("exact name wins", func(t *testing.T) {
-		dir := mockOCRDirs(t)
-		writeTestGGUF(t, filepath.Join(dir, "mmproj-other.gguf"), []ggufKV{
-			{"general.name", ggufTypeString, ggufStr("other projector")},
-		})
-		writeTestGGUF(t, filepath.Join(dir, "mmproj-MiniCPM-OCR-1_0-Q4_K_M.gguf"), []ggufKV{
-			{"general.name", ggufTypeString, ggufStr("matching projector")},
-		})
-		got, err := FindLlamacppMMProjForModel("MiniCPM-OCR-1_0-Q4_K_M")
-		if err != nil {
-			t.Fatalf("FindLlamacppMMProjForModel() = %v", err)
+	want := map[string]bool{
+		"LFM3-1.7B-QAD-Q4_0":     false,
+		"MiniCPM-OCR-1_0-Q4_K_M": true,
+		"plain-vl":               false,
+		"d1-2B-Q4_K_M":           true,
+	}
+	for _, m := range GetLlamacppModels() {
+		hasImage := contains(m.InputTypes, "image")
+		wantImage, ok := want[m.Name]
+		if !ok {
+			t.Fatalf("unexpected model %q", m.Name)
 		}
-		if filepath.Base(got) != "mmproj-MiniCPM-OCR-1_0-Q4_K_M.gguf" {
-			t.Errorf("projector = %q, want the exact name match", got)
+		if hasImage != wantImage {
+			t.Errorf("%q InputTypes = %v, want image=%v", m.Name, m.InputTypes, wantImage)
 		}
-	})
-
-	t.Run("ambiguous", func(t *testing.T) {
-		dir := mockOCRDirs(t)
-		writeTestGGUF(t, filepath.Join(dir, "mmproj-other.gguf"), []ggufKV{
-			{"general.name", ggufTypeString, ggufStr("other projector")},
-		})
-		if _, err := FindLlamacppMMProjForModel("plain-vl"); err == nil {
-			t.Fatal("FindLlamacppMMProjForModel() = nil error, want ambiguity error")
-		}
-	})
+	}
 }
 
 func TestIsOCRModel(t *testing.T) {

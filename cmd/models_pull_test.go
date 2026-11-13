@@ -4,9 +4,60 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"edgebot/config"
 )
+
+func TestSaveDownloadedMMProjLink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	modelsDir := filepath.Join(home, ".edgebot", "models", "llamacpp")
+	if err := os.MkdirAll(modelsDir, 0755); err != nil {
+		t.Fatalf("create models dir: %v", err)
+	}
+	for _, name := range []string{"vision-Q4.gguf", "mmproj-vision-f16.gguf"} {
+		if err := os.WriteFile(filepath.Join(modelsDir, name), []byte("x"), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	if err := saveDownloadedMMProjLink(
+		[]string{"vision-Q4.gguf", "mmproj-vision-f16.gguf"},
+		[]bool{true, true},
+	); err != nil {
+		t.Fatalf("saveDownloadedMMProjLink() = %v", err)
+	}
+	got, err := config.FindLlamacppMMProjForModel("vision-Q4")
+	if err != nil {
+		t.Fatalf("FindLlamacppMMProjForModel() = %v", err)
+	}
+	want := filepath.Join(modelsDir, "mmproj-vision-f16.gguf")
+	if got != want {
+		t.Errorf("projector = %q, want %q", got, want)
+	}
+
+	t.Run("projector download failed", func(t *testing.T) {
+		if err := saveDownloadedMMProjLink(
+			[]string{"lonely.gguf", "mmproj-vision-f16.gguf"},
+			[]bool{true, false},
+		); err != nil {
+			t.Fatalf("saveDownloadedMMProjLink() = %v", err)
+		}
+		got, err := config.FindLlamacppMMProjForModel("lonely")
+		if err != nil {
+			t.Fatalf("FindLlamacppMMProjForModel() = %v", err)
+		}
+		if got != "" {
+			t.Errorf("projector = %q, want none (download failed)", got)
+		}
+	})
+}
 
 func TestSplitRepoFiles(t *testing.T) {
 	files := []repoFile{

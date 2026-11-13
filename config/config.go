@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -614,132 +613,63 @@ func GetLitertLMModels() []ModelInfo {
 }
 
 // GetLlamacppModels lists the GGUF models on disk (excluding vision projector
-// files). Models whose base name matches an available mmproj file get the
-// image input type; OCR models also accept a unique projector under an
-// unrelated filename (e.g. MiniCPM-OCR's mmproj-model-f16-4x.gguf).
+// files). A model gets the image input type only when the coupling registry
+// links it to a projector; the association is never inferred from filenames.
 func GetLlamacppModels() []ModelInfo {
 	dir, err := ModelsDir("llamacpp")
 	if err != nil {
 		return nil
 	}
-	all := scanModels(dir, "llamacpp", ".gguf", true)
-	visionKeys := map[string]bool{}
-	mmprojCount := 0
-	for _, m := range all {
-		if strings.Contains(strings.ToLower(m.Name), "mmproj") {
-			visionKeys[llamacppVisionKey(m.Name)] = true
-			mmprojCount++
-		}
+	links, err := loadMMProjLinks(dir)
+	if err != nil {
+		slog.Warn("failed to read vision projector links", "err", err)
+		links = map[string]string{}
 	}
 	var models []ModelInfo
-	for _, m := range all {
-		if strings.Contains(strings.ToLower(m.Name), "mmproj") {
+	for _, m := range scanModels(dir, "llamacpp", ".gguf", true) {
+		if isMMProjName(m.Name) {
 			continue
 		}
-		if visionKeys[llamacppVisionKey(m.Name)] || (mmprojCount == 1 && m.Type == ModelTypeOCR) {
-			m.InputTypes = []string{"text", "image"}
+		if proj := linkedMMProjName(links, m.Name); proj != "" {
+			if _, err := os.Stat(filepath.Join(dir, proj+".gguf")); err == nil {
+				m.InputTypes = []string{"text", "image"}
+			}
 		}
 		models = append(models, m)
 	}
 	return models
 }
 
-// llamacppQuantRe matches the quantization suffix of a GGUF base name (e.g.
-// -Q8_0, -Q4_K_M, -f16) so a model can be matched to its vision projector
-// even when their quantizations differ.
-var llamacppQuantRe = regexp.MustCompile(`-[Qq][0-9][A-Za-z0-9._]*$|-(?:f16|F16|bf16|BF16)$`)
-
-// llamacppVisionKey normalizes a GGUF base name (mmproj or model) to an
-// identity used to pair a model with its vision projector: it strips the
-// mmproj marker prefix/suffix and any quantization suffix.
-func llamacppVisionKey(name string) string {
-	s := strings.TrimPrefix(name, "mmproj-")
-	s = strings.TrimSuffix(s, "-mmproj")
-	return llamacppQuantRe.ReplaceAllString(s, "")
+// isMMProjName reports whether a GGUF base name belongs to a vision projector.
+func isMMProjName(name string) bool {
+	return strings.Contains(strings.ToLower(name), "mmproj")
 }
 
-// FindLlamacppMMProj resolves the vision projector (mmproj) GGUF file used for
-// image input by scanning the llamacpp models dir for a file whose name
-// contains "mmproj". Returns "" when no projector is present.
-func FindLlamacppMMProj() (string, error) {
-	dir, err := ModelsDir("llamacpp")
-	if err != nil {
-		return "", err
-	}
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", fmt.Errorf("scan mmproj: %w", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		lower := strings.ToLower(entry.Name())
-		if strings.HasSuffix(lower, ".gguf") && strings.Contains(lower, "mmproj") {
-			return filepath.Join(dir, entry.Name()), nil
-		}
-	}
-	return "", nil
-}
-
-// FindLlamacppMMProjForModel resolves the vision projector (mmproj) for a
-// specific model. It first tries a name match (normalizing quantization
-// suffixes); when no projector is named after the model, a unique projector in
-// the models dir is used as a fallback (MiniCPM-OCR ships
-// mmproj-model-f16-4x.gguf next to MiniCPM-OCR-1_0-*.gguf). With several
-// unrelated projectors it returns an error instead of guessing.
+// FindLlamacppMMProjForModel returns the vision projector linked to modelName in
+// the coupling registry, or "" when the model has no linked projector. The
+// registry is written when a model and its projector are pulled together (or
+// via `edgebot models link`); projectors are never guessed from filenames.
 func FindLlamacppMMProjForModel(modelName string) (string, error) {
 	dir, err := ModelsDir("llamacpp")
 	if err != nil {
 		return "", err
 	}
-	candidates, err := llamacppMMProjFiles(dir)
+	links, err := loadMMProjLinks(dir)
 	if err != nil {
 		return "", err
 	}
-	if len(candidates) == 0 {
+	proj := linkedMMProjName(links, modelName)
+	if proj == "" {
 		return "", nil
 	}
-	key := llamacppVisionKey(modelName)
-	for _, base := range candidates {
-		if llamacppVisionKey(base) == key {
-			return filepath.Join(dir, base+".gguf"), nil
-		}
-	}
-	if len(candidates) == 1 {
-		return filepath.Join(dir, candidates[0]+".gguf"), nil
-	}
-	return "", fmt.Errorf(
-		"multiple vision projectors found in %s (%s); set llm.ocr_mmproj or rename one to match the model",
-		dir, strings.Join(candidates, ", "))
-}
-
-// llamacppMMProjFiles lists the base names of mmproj GGUF files in dir.
-func llamacppMMProjFiles(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	path := filepath.Join(dir, proj+".gguf")
+	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return "", nil
 		}
-		return nil, fmt.Errorf("scan mmproj: %w", err)
+		return "", fmt.Errorf("stat vision projector: %w", err)
 	}
-	var bases []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		lower := strings.ToLower(name)
-		if !strings.HasSuffix(lower, ".gguf") || !strings.Contains(lower, "mmproj") {
-			continue
-		}
-		bases = append(bases, name[:len(name)-len(".gguf")])
-	}
-	return bases, nil
+	return path, nil
 }
 
 // scanModels lists the files with the given extension in dir as ModelInfos.
@@ -812,67 +742,30 @@ func DeleteLocalModel(modelName string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Classify before removing the file: LookupModelInfo can no longer
-		// see it afterwards.
-		isOCR := IsOCRModelFile(filepath.Join(dir, modelName+".gguf"))
+		// Drop any coupling first so the registry never points at a deleted
+		// model or projector.
+		proj, err := deleteMMProjLink(dir, modelName)
+		if err != nil {
+			slog.Warn("failed to remove vision projector link", "model", modelName, "err", err)
+		}
 		path, err := removeModelFile(filepath.Join(dir, modelName+".gguf"))
 		if err != nil {
 			return nil, err
 		}
 		removed := []string{path}
-		projs := llamacppMMProjsForModel(dir, modelName)
-		// OCR models may ship a projector under an unrelated name (e.g.
-		// MiniCPM-OCR's mmproj-model-f16-4x.gguf); remove it when it is the
-		// only projector, matching the runtime resolver.
-		if len(projs) == 0 && isOCR {
-			if proj, _ := FindLlamacppMMProjForModel(modelName); proj != "" {
-				projs = append(projs, strings.TrimSuffix(filepath.Base(proj), ".gguf"))
-			}
-		}
-		for _, proj := range projs {
+		if proj != "" {
 			projPath := filepath.Join(dir, proj+".gguf")
 			if _, err := removeModelFile(projPath); err != nil {
 				if !os.IsNotExist(err) {
 					slog.Warn("failed to delete vision projector", "path", projPath, "error", err)
 				}
-				continue
+			} else {
+				removed = append(removed, projPath)
 			}
-			removed = append(removed, projPath)
 		}
 		return removed, nil
 	}
 	return nil, fmt.Errorf("model %q is not a locally downloaded model", modelName)
-}
-
-// llamacppMMProjsForModel lists the vision projector base names in dir whose
-// vision key matches the given model's, so deleting the model also removes its
-// paired mmproj files.
-func llamacppMMProjsForModel(dir, modelName string) []string {
-	key := llamacppVisionKey(modelName)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			slog.Warn("failed to scan mmproj list", "dir", dir, "err", err)
-		}
-		return nil
-	}
-	var projs []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		lower := strings.ToLower(name)
-		if !strings.HasSuffix(lower, ".gguf") || !strings.Contains(lower, "mmproj") {
-			continue
-		}
-		// Case-insensitive suffix trim.
-		base := name[:len(name)-len(".gguf")]
-		if llamacppVisionKey(base) == key {
-			projs = append(projs, base)
-		}
-	}
-	return projs
 }
 
 func removeModelFile(path string) (string, error) {

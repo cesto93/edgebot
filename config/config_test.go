@@ -1009,6 +1009,12 @@ func TestGetLlamacppModelsExcludesMMProj(t *testing.T) {
 			t.Fatalf("Failed to write file %s: %v", name, err)
 		}
 	}
+	if err := SaveMMProjLink(
+		"Qwen2.5-VL-3B-Instruct-Q8_0",
+		"mmproj-Qwen2.5-VL-3B-Instruct-Q8_0",
+	); err != nil {
+		t.Fatalf("SaveMMProjLink() error = %v", err)
+	}
 
 	models := GetLlamacppModels()
 	if len(models) != 2 {
@@ -1028,7 +1034,7 @@ func TestGetLlamacppModelsExcludesMMProj(t *testing.T) {
 	}
 }
 
-func TestGetLlamacppModelsMatchesMMProjWithDifferentQuant(t *testing.T) {
+func TestGetLlamacppModelsUsesLinkedMMProj(t *testing.T) {
 	home := t.TempDir()
 	origHome := userHomeDirFunc
 	userHomeDirFunc = func() (string, error) { return home, nil }
@@ -1058,6 +1064,21 @@ func TestGetLlamacppModelsMatchesMMProjWithDifferentQuant(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(modelsDir, name), []byte("m"), 0644); err != nil {
 			t.Fatalf("Failed to write file %s: %v", name, err)
 		}
+	}
+
+	// Without an explicit link the projector is not coupled, even when the
+	// names look like a match.
+	for _, m := range GetLlamacppModels() {
+		if slices.Contains(m.InputTypes, "image") {
+			t.Fatalf("%q InputTypes = %v, want text only before linking", m.Name, m.InputTypes)
+		}
+	}
+
+	if err := SaveMMProjLink(
+		"Qwen2.5-VL-3B-Instruct-Q8_0",
+		"mmproj-Qwen2.5-VL-3B-Instruct-f16",
+	); err != nil {
+		t.Fatalf("SaveMMProjLink() error = %v", err)
 	}
 
 	models := GetLlamacppModels()
@@ -1108,57 +1129,4 @@ func TestGetLlamacppModelsNoMMProjNoImage(t *testing.T) {
 	if len(models[0].InputTypes) != 0 {
 		t.Errorf("GetLlamacppModels() InputTypes = %v, want none (no mmproj present)", models[0].InputTypes)
 	}
-}
-
-func TestFindLlamacppMMProj(t *testing.T) {
-	home := t.TempDir()
-	origHome := userHomeDirFunc
-	userHomeDirFunc = func() (string, error) { return home, nil }
-	defer func() { userHomeDirFunc = origHome }()
-
-	// Isolate from the real ~/.config/edgebot config and avoid network
-	// lookups inside LoadConfig.
-	origUserConfigDirFunc := userConfigDirFunc
-	userConfigDirFunc = func() (string, error) { return t.TempDir(), nil }
-	defer func() { userConfigDirFunc = origUserConfigDirFunc }()
-
-	origConfigPaths := configPaths
-	defer func() { configPaths = origConfigPaths }()
-	configPaths = []string{t.TempDir()}
-
-	origOpenRouter := getOpenRouterModelsFunc
-	getOpenRouterModelsFunc = func() []ModelInfo { return nil }
-	defer func() { getOpenRouterModelsFunc = origOpenRouter }()
-
-	modelsDir := filepath.Join(home, ".edgebot", "models", "llamacpp")
-	if err := os.MkdirAll(modelsDir, 0755); err != nil {
-		t.Fatalf("Failed to create models dir: %v", err)
-	}
-	projFile := filepath.Join(modelsDir, "mmproj-qwen2.5-vl.gguf")
-	if err := os.WriteFile(projFile, []byte("m"), 0644); err != nil {
-		t.Fatalf("Failed to write mmproj: %v", err)
-	}
-
-	t.Run("auto-detect from models dir", func(t *testing.T) {
-		got, err := FindLlamacppMMProj()
-		if err != nil {
-			t.Fatalf("FindLlamacppMMProj() error = %v", err)
-		}
-		if got != projFile {
-			t.Errorf("FindLlamacppMMProj() = %q, want %q", got, projFile)
-		}
-	})
-
-	t.Run("missing projector", func(t *testing.T) {
-		if err := os.Remove(projFile); err != nil {
-			t.Fatalf("Failed to remove mmproj: %v", err)
-		}
-		got, err := FindLlamacppMMProj()
-		if err != nil {
-			t.Fatalf("FindLlamacppMMProj() error = %v", err)
-		}
-		if got != "" {
-			t.Errorf("FindLlamacppMMProj() = %q, want empty", got)
-		}
-	})
 }

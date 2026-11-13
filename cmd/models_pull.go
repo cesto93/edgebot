@@ -40,8 +40,9 @@ else is saved to ~/.edgebot/models/llamacpp/ as a GGUF model.
 
 Up to two files may be downloaded per repo: when a single file is pulled the
 config is updated to use this model; when two files are pulled the first is
-treated as the model and the second as its vision projector (mmproj), which is
-auto-detected by scanning the models dir.`,
+treated as the model and the second as its vision projector (mmproj). The
+coupling is saved in the llamacpp models dir (mmproj.json) and is what runtime
+uses — projectors are never inferred from filenames.`,
 	Args: cobra.RangeArgs(1, 3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPull(args[0], args[1:])
@@ -259,6 +260,9 @@ func updateConfig(filenames []string, downloaded []bool) error {
 	provider := providerForFilename(filename)
 	modelName := strings.TrimSuffix(filename, filepath.Ext(filename))
 	if provider == "llamacpp" {
+		if err := saveDownloadedMMProjLink(filenames, downloaded); err != nil {
+			return err
+		}
 		if dir, err := config.ModelsDir(provider); err == nil {
 			path := filepath.Join(dir, filename)
 			if config.IsDecisionModelFile(path) {
@@ -288,6 +292,20 @@ func updateConfig(filenames []string, downloaded []bool) error {
 		}
 	}
 	return config.SaveModelWithProvider(modelName, provider)
+}
+
+// saveDownloadedMMProjLink persists the model/projector coupling when a pull
+// downloaded both files, so runtime never has to infer it from filenames.
+func saveDownloadedMMProjLink(filenames []string, downloaded []bool) error {
+	if len(filenames) < 2 || len(downloaded) < 2 || !downloaded[1] {
+		return nil
+	}
+	modelName := strings.TrimSuffix(filenames[0], filepath.Ext(filenames[0]))
+	mmprojName := strings.TrimSuffix(filenames[1], filepath.Ext(filenames[1]))
+	if err := config.SaveMMProjLink(modelName, mmprojName); err != nil {
+		return fmt.Errorf("failed to save vision projector link: %w", err)
+	}
+	return nil
 }
 
 func providerForFilename(filename string) string {

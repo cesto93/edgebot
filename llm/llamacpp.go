@@ -558,8 +558,9 @@ func (l *LlamacppCaller) initialize() error {
 }
 
 // resolveMMProj returns the vision projector to load: the explicit MMProj
-// when set, otherwise the projector resolved from the model name (with a
-// unique-projector fallback).
+// when set, otherwise the projector recorded in the coupling registry (written
+// by `edgebot models pull` / `edgebot models link`). Unrelated projectors are
+// never guessed from filenames.
 func (l *LlamacppCaller) resolveMMProj() (string, error) {
 	if l.MMProj == "" {
 		return config.FindLlamacppMMProjForModel(l.Model)
@@ -590,7 +591,8 @@ func (l *LlamacppCaller) setupVision(llm llama.Model) {
 		return
 	}
 	if mmproj == "" {
-		slog.Debug("llamacpp: no mmproj found, image input disabled")
+		slog.Debug("llamacpp: no vision projector linked to this model, image input disabled",
+			"model", l.Model)
 		return
 	}
 	if err := mtmd.Load(l.libDir); err != nil {
