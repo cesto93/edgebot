@@ -39,19 +39,34 @@ jobs:
         with:
           version: latest
 
+      - name: Shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck scripts/*.sh docker-entrypoint.sh
+
+      - name: Vulnerability check
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+
       - name: Build
         run: go build -o edgebot .
 
       - name: Run tests with race detector and coverage
-        run: go test -race -coverprofile=coverage.out ./...
+        run: go test -race -shuffle=on -coverprofile=coverage.out ./...
+
+      - name: Allowlist fuzz smoke test
+        run: go test -run XXX -fuzz FuzzIsAllowedCommand -fuzztime=10s ./config
 
       - name: Check coverage floor
         run: |
           COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
           echo "### Coverage: ${COVERAGE}%" >> "$GITHUB_STEP_SUMMARY"
           # Ratchet, not a goal: fail only when coverage regresses.
-          if awk "BEGIN {exit !($COVERAGE < 40)}"; then
-            echo "Coverage ${COVERAGE}% is below the 40% floor"
+          if awk "BEGIN {exit !($COVERAGE < 45)}"; then
+            echo "Coverage ${COVERAGE}% is below the 45% floor"
             exit 1
           fi
 
