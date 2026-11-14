@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // mockDecisionDirs isolates home/config/routing from the real machine and
@@ -159,25 +158,12 @@ func TestSaveConfigWritesDecisionModel(t *testing.T) {
 	cfg := &Config{
 		ConfigFile: filepath.Join(configPath, "config.yaml"),
 		LogLevel:   "info",
-		LLM: struct {
-			Provider      string   `mapstructure:"provider"`
-			Model         string   `mapstructure:"model"`
-			DecisionModel string   `mapstructure:"decision_model"`
-			OCRModel      string   `mapstructure:"ocr_model"`
-			OCRMMProj     string   `mapstructure:"ocr_mmproj"`
-			InputTypes    []string `mapstructure:"input_types"`
-			ThinkEffort   string   `mapstructure:"think_effort"`
-		}{
+		LLM: LLMConfig{
 			Provider:      "ollama",
 			Model:         "test-model",
 			DecisionModel: "lev-1",
 		},
-		Shell: struct {
-			Confirm         bool          `mapstructure:"confirm"`
-			AllowedCommands []string      `mapstructure:"allowed_commands"`
-			CommandTimeout  time.Duration `mapstructure:"command_timeout"`
-			ReadDenylist    []string      `mapstructure:"read_denylist"`
-		}{
+		Shell: ShellConfig{
 			Confirm:         true,
 			AllowedCommands: []string{"ls"},
 		},

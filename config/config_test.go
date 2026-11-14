@@ -890,24 +890,11 @@ func TestSaveConfig(t *testing.T) {
 	cfg := &Config{
 		ConfigFile: configFile,
 		LogLevel:   "info",
-		LLM: struct {
-			Provider      string   `mapstructure:"provider"`
-			Model         string   `mapstructure:"model"`
-			DecisionModel string   `mapstructure:"decision_model"`
-			OCRModel      string   `mapstructure:"ocr_model"`
-			OCRMMProj     string   `mapstructure:"ocr_mmproj"`
-			InputTypes    []string `mapstructure:"input_types"`
-			ThinkEffort   string   `mapstructure:"think_effort"`
-		}{
+		LLM: LLMConfig{
 			Provider: "ollama",
 			Model:    "test-model",
 		},
-		Shell: struct {
-			Confirm         bool          `mapstructure:"confirm"`
-			AllowedCommands []string      `mapstructure:"allowed_commands"`
-			CommandTimeout  time.Duration `mapstructure:"command_timeout"`
-			ReadDenylist    []string      `mapstructure:"read_denylist"`
-		}{
+		Shell: ShellConfig{
 			Confirm:         true,
 			AllowedCommands: []string{"ls", "pwd"},
 		},
@@ -946,15 +933,7 @@ func TestSaveConfigEmptyPath(t *testing.T) {
 
 	cfg := &Config{
 		LogLevel: "info",
-		LLM: struct {
-			Provider      string   `mapstructure:"provider"`
-			Model         string   `mapstructure:"model"`
-			DecisionModel string   `mapstructure:"decision_model"`
-			OCRModel      string   `mapstructure:"ocr_model"`
-			OCRMMProj     string   `mapstructure:"ocr_mmproj"`
-			InputTypes    []string `mapstructure:"input_types"`
-			ThinkEffort   string   `mapstructure:"think_effort"`
-		}{
+		LLM: LLMConfig{
 			Provider: "gemini",
 			Model:    "gemini-3.7-flash",
 		},
@@ -1129,5 +1108,35 @@ func TestGetLlamacppModelsNoMMProjNoImage(t *testing.T) {
 	}
 	if len(models[0].InputTypes) != 0 {
 		t.Errorf("GetLlamacppModels() InputTypes = %v, want none (no mmproj present)", models[0].InputTypes)
+	}
+}
+
+func TestDefaultConfigFileUsesReadableTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	origConfigPaths := configPaths
+	configPaths = []string{tmpDir}
+	t.Cleanup(func() { configPaths = origConfigPaths })
+
+	origUserConfigDirFunc := userConfigDirFunc
+	userConfigDirFunc = func() (string, error) { return tmpDir, nil }
+	t.Cleanup(func() { userConfigDirFunc = origUserConfigDirFunc })
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() = %v", err)
+	}
+	if cfg.ConfigFile == "" {
+		t.Fatal("default config file was not created")
+	}
+
+	data, err := os.ReadFile(cfg.ConfigFile)
+	if err != nil {
+		t.Fatalf("read default config: %v", err)
+	}
+	if !bytes.Contains(data, []byte("command_timeout: 2m")) {
+		t.Errorf("default config does not store the timeout as a duration:\n%s", data)
+	}
+	if bytes.Contains(data, []byte("120000000000")) {
+		t.Errorf("default config stores the timeout in nanoseconds:\n%s", data)
 	}
 }

@@ -33,42 +33,70 @@ type CommandInfo struct {
 	Schema      string
 }
 
+// LLMConfig holds the provider/model selection and the task-specific models.
+type LLMConfig struct {
+	Provider string `mapstructure:"provider" yaml:"provider"`
+	Model    string `mapstructure:"model" yaml:"model"`
+	// DecisionModel is the default decision model for `edgebot decide`
+	// (a System One GGUF in the llamacpp models dir). Empty = unset.
+	DecisionModel string `mapstructure:"decision_model" yaml:"decision_model,omitempty"`
+	// OCRModel is the default OCR model used by `edgebot ocr`. Empty =
+	// unset; pull an OCR GGUF or set it via `edgebot config --ocr-model`.
+	OCRModel string `mapstructure:"ocr_model" yaml:"ocr_model,omitempty"`
+	// OCRMMProj is the optional vision projector (mmproj) for OCRModel.
+	// Empty = the projector linked to the model in mmproj.json (written
+	// by `edgebot models pull` / `models link`).
+	OCRMMProj   string   `mapstructure:"ocr_mmproj" yaml:"ocr_mmproj,omitempty"`
+	InputTypes  []string `mapstructure:"input_types" yaml:"input_types,omitempty"`
+	ThinkEffort string   `mapstructure:"think_effort" yaml:"think_effort,omitempty"`
+}
+
+// ShellConfig holds the interactive/execution safety settings.
+type ShellConfig struct {
+	Confirm         bool     `mapstructure:"confirm" yaml:"confirm"`
+	AllowedCommands []string `mapstructure:"allowed_commands" yaml:"allowed_commands,omitempty"`
+	// CommandTimeout bounds a single RunCommand tool call (zero uses the
+	// default). Stored as a duration string in YAML ("2m").
+	CommandTimeout time.Duration `mapstructure:"command_timeout" yaml:"-"`
+	// ReadDenylist blocks ReadFile on matching paths (opt-in).
+	ReadDenylist []string `mapstructure:"read_denylist" yaml:"read_denylist,omitempty"`
+}
+
+// MarshalYAML stores the command timeout as a human-readable duration ("2m");
+// marshaling time.Duration directly would emit nanoseconds.
+func (s ShellConfig) MarshalYAML() (any, error) {
+	out := struct {
+		Confirm         bool     `yaml:"confirm"`
+		AllowedCommands []string `yaml:"allowed_commands,omitempty"`
+		CommandTimeout  string   `yaml:"command_timeout,omitempty"`
+		ReadDenylist    []string `yaml:"read_denylist,omitempty"`
+	}{
+		Confirm:         s.Confirm,
+		AllowedCommands: s.AllowedCommands,
+		ReadDenylist:    s.ReadDenylist,
+	}
+	if s.CommandTimeout > 0 {
+		out.CommandTimeout = s.CommandTimeout.String()
+	}
+	return out, nil
+}
+
+// LitertLMConfig holds the in-process LiteRT-LM settings.
+type LitertLMConfig struct {
+	Backend string `mapstructure:"backend" yaml:"backend"`
+}
+
 type Config struct {
-	ConfigFile string
-	LogLevel   string `mapstructure:"log_level"`
-	Agent      string `mapstructure:"agent"`
-	AgentFiles bool   `mapstructure:"agent_files"`
-	Skills     bool   `mapstructure:"skills"`
-	LLM        struct {
-		Provider string `mapstructure:"provider"`
-		Model    string `mapstructure:"model"`
-		// DecisionModel is the default decision model for `edgebot decide`
-		// (a System One GGUF in the llamacpp models dir). Empty = unset.
-		DecisionModel string `mapstructure:"decision_model"`
-		// OCRModel is the default OCR model used by `edgebot ocr`. Empty =
-		// unset; pull an OCR GGUF or set it via `edgebot config --ocr-model`.
-		OCRModel string `mapstructure:"ocr_model"`
-		// OCRMMProj is the optional vision projector (mmproj) for OCRModel.
-		// Empty = the projector linked to the model in mmproj.json (written
-		// by `edgebot models pull` / `models link`).
-		OCRMMProj   string   `mapstructure:"ocr_mmproj"`
-		InputTypes  []string `mapstructure:"input_types"`
-		ThinkEffort string   `mapstructure:"think_effort"`
-	} `mapstructure:"llm"`
-	Shell struct {
-		Confirm         bool     `mapstructure:"confirm"`
-		AllowedCommands []string `mapstructure:"allowed_commands"`
-		// CommandTimeout bounds a single RunCommand tool call (zero uses
-		// the 2m default). Stored as a duration string in YAML ("2m").
-		CommandTimeout time.Duration `mapstructure:"command_timeout"`
-		// ReadDenylist blocks ReadFile on matching paths (opt-in).
-		ReadDenylist []string `mapstructure:"read_denylist"`
-	} `mapstructure:"shell"`
-	LitertLM struct {
-		Backend string `mapstructure:"backend"`
-	} `mapstructure:"litertlm"`
-	Tools    map[string]bool   `mapstructure:"tools"`
-	Commands map[string]string `mapstructure:"commands"`
+	ConfigFile string            `yaml:"-"`
+	LogLevel   string            `mapstructure:"log_level" yaml:"log_level"`
+	Agent      string            `mapstructure:"agent" yaml:"agent,omitempty"`
+	AgentFiles bool              `mapstructure:"agent_files" yaml:"agent_files"`
+	Skills     bool              `mapstructure:"skills" yaml:"skills"`
+	LLM        LLMConfig         `mapstructure:"llm" yaml:"llm"`
+	Shell      ShellConfig       `mapstructure:"shell" yaml:"shell"`
+	LitertLM   LitertLMConfig    `mapstructure:"litertlm" yaml:"litertlm"`
+	Tools      map[string]bool   `mapstructure:"tools" yaml:"tools,omitempty"`
+	Commands   map[string]string `mapstructure:"commands" yaml:"commands,omitempty"`
 }
 
 var configPaths = []string{"."}
@@ -91,6 +119,56 @@ var defaultTools = map[string]bool{
 	"KVSet":      true,
 	"KVGet":      true,
 	"KVList":     true,
+}
+
+// defaultConfig returns the built-in configuration. It is the single source of
+// truth for defaults: the viper defaults, the no-config-file fallback and the
+// initial config.yaml are all derived from it.
+func defaultConfig() *Config {
+	return &Config{
+		LogLevel:   "info",
+		Agent:      "build",
+		AgentFiles: true,
+		Skills:     true,
+		LLM: LLMConfig{
+			Provider:   "ollama",
+			Model:      "granite4:3b-h",
+			InputTypes: []string{"text"},
+		},
+		Shell: ShellConfig{
+			Confirm:         true,
+			AllowedCommands: []string{"ls", "pwd", "git"},
+			CommandTimeout:  defaultCommandTimeout,
+		},
+		LitertLM: LitertLMConfig{Backend: "cpu"},
+		Tools:    cloneTools(),
+	}
+}
+
+// cloneTools copies defaultTools so callers cannot mutate the package default.
+func cloneTools() map[string]bool {
+	out := make(map[string]bool, len(defaultTools))
+	for k, v := range defaultTools {
+		out[k] = v
+	}
+	return out
+}
+
+// registerDefaults installs defaultConfig() as the viper fallback for fields a
+// config file may omit.
+func registerDefaults(v *viper.Viper) {
+	d := defaultConfig()
+	v.SetDefault("log_level", d.LogLevel)
+	v.SetDefault("agent", d.Agent)
+	v.SetDefault("agent_files", d.AgentFiles)
+	v.SetDefault("skills", d.Skills)
+	v.SetDefault("llm.provider", d.LLM.Provider)
+	v.SetDefault("llm.model", d.LLM.Model)
+	v.SetDefault("shell.confirm", d.Shell.Confirm)
+	v.SetDefault("shell.allowed_commands", d.Shell.AllowedCommands)
+	v.SetDefault("shell.command_timeout", d.Shell.CommandTimeout)
+	v.SetDefault("litertlm.backend", d.LitertLM.Backend)
+	v.SetDefault("tools", cloneTools())
 }
 
 func loadEnv() error {
@@ -142,21 +220,7 @@ func LoadConfig() (*Config, error) {
 	v := viper.New()
 	v.SetConfigName("config")
 	v.SetConfigType("yaml")
-	v.SetDefault("llm.provider", "ollama")
-	v.SetDefault("llm.model", "granite4:3b-h")
-	v.SetDefault("shell.confirm", true)
-	v.SetDefault("shell.allowed_commands", []string{"ls", "pwd", "git"})
-	v.SetDefault("shell.command_timeout", defaultCommandTimeout)
-	v.SetDefault("log_level", "info")
-	v.SetDefault("agent", "build")
-	v.SetDefault("agent_files", true)
-	v.SetDefault("skills", true)
-	v.SetDefault("litertlm.backend", "cpu")
-	toolsCopy := make(map[string]bool, len(defaultTools))
-	for k, v := range defaultTools {
-		toolsCopy[k] = v
-	}
-	v.SetDefault("tools", toolsCopy)
+	registerDefaults(v)
 
 	for _, path := range configPaths {
 		v.AddConfigPath(path)
@@ -172,56 +236,17 @@ func LoadConfig() (*Config, error) {
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
 		if errors.As(err, &notFound) {
-			toolsClone := make(map[string]bool, len(defaultTools))
-			for k, v := range defaultTools {
-				toolsClone[k] = v
-			}
-			defaultConfig := &Config{
-				ConfigFile: "",
-				LogLevel:   "info",
-				Agent:      "build",
-				AgentFiles: true,
-				Skills:     true,
-				LLM: struct {
-					Provider      string   `mapstructure:"provider"`
-					Model         string   `mapstructure:"model"`
-					DecisionModel string   `mapstructure:"decision_model"`
-					OCRModel      string   `mapstructure:"ocr_model"`
-					OCRMMProj     string   `mapstructure:"ocr_mmproj"`
-					InputTypes    []string `mapstructure:"input_types"`
-					ThinkEffort   string   `mapstructure:"think_effort"`
-				}{
-					Provider:   "ollama",
-					Model:      "granite4:3b-h",
-					InputTypes: []string{"text"},
-				},
-				Shell: struct {
-					Confirm         bool          `mapstructure:"confirm"`
-					AllowedCommands []string      `mapstructure:"allowed_commands"`
-					CommandTimeout  time.Duration `mapstructure:"command_timeout"`
-					ReadDenylist    []string      `mapstructure:"read_denylist"`
-				}{
-					Confirm:         true,
-					AllowedCommands: []string{"ls", "pwd", "git"},
-					CommandTimeout:  defaultCommandTimeout,
-				},
-				LitertLM: struct {
-					Backend string `mapstructure:"backend"`
-				}{
-					Backend: "cpu",
-				},
-				Tools: toolsClone,
-			}
-
-			if configPath != "" {
+			defaultCfg := defaultConfig()
+			if content, mErr := yaml.Marshal(defaultCfg); mErr != nil {
+				slog.Warn("failed to marshal default config", "err", mErr)
+			} else if configPath != "" {
 				if mkErr := os.MkdirAll(configPath, 0o755); mkErr == nil {
 					defaultConfigFile := filepath.Join(configPath, "config.yaml")
 					if _, statErr := os.Stat(defaultConfigFile); os.IsNotExist(statErr) {
-						content := "log_level: \"info\"\nagent: \"build\"\nagent_files: true\nskills: true\nllm:\n  provider: \"ollama\"\n  model: \"granite4:3b-h\"\n  ocr_model: \"\"\n  input_types:\n    - \"text\"\nshell:\n  confirm: true\n  allowed_commands:\n    - \"ls\"\n    - \"pwd\"\n    - \"git\"\n  command_timeout: \"2m\"\nlitertlm:\n  backend: \"cpu\"\ntools:\n  RunCommand: true\n  WriteFile: true\n  ReadFile: true\n  KVSet: true\n  KVGet: true\n  KVList: true\n"
-						if writeErr := atomicfile.Write(defaultConfigFile, []byte(content), 0o644); writeErr != nil {
+						if writeErr := atomicfile.Write(defaultConfigFile, content, 0o644); writeErr != nil {
 							slog.Warn("failed to write default config", "err", writeErr)
 						} else {
-							defaultConfig.ConfigFile = defaultConfigFile
+							defaultCfg.ConfigFile = defaultConfigFile
 						}
 					}
 				} else {
@@ -229,9 +254,9 @@ func LoadConfig() (*Config, error) {
 				}
 			}
 
-			applyEnvOverrides(defaultConfig)
+			applyEnvOverrides(defaultCfg)
 
-			return defaultConfig, nil
+			return defaultCfg, nil
 		}
 		return nil, fmt.Errorf("error reading config file: %w", err)
 	}
@@ -245,11 +270,7 @@ func LoadConfig() (*Config, error) {
 	applyEnvOverrides(&config)
 
 	if config.Tools == nil {
-		clone := make(map[string]bool, len(defaultTools))
-		for k, v := range defaultTools {
-			clone[k] = v
-		}
-		config.Tools = clone
+		config.Tools = cloneTools()
 	}
 
 	if len(config.LLM.InputTypes) == 0 {
@@ -395,57 +416,7 @@ func SaveConfig(cfg *Config) error {
 		configFile = filepath.Join(configPath, "config.yaml")
 	}
 
-	out := struct {
-		LogLevel   string `yaml:"log_level"`
-		Agent      string `yaml:"agent,omitempty"`
-		AgentFiles bool   `yaml:"agent_files"`
-		Skills     bool   `yaml:"skills"`
-		LLM        struct {
-			Provider      string   `yaml:"provider"`
-			Model         string   `yaml:"model"`
-			DecisionModel string   `yaml:"decision_model,omitempty"`
-			OCRModel      string   `yaml:"ocr_model,omitempty"`
-			OCRMMProj     string   `yaml:"ocr_mmproj,omitempty"`
-			InputTypes    []string `yaml:"input_types,omitempty"`
-			ThinkEffort   string   `yaml:"think_effort,omitempty"`
-		} `yaml:"llm"`
-		Shell struct {
-			Confirm         bool     `yaml:"confirm"`
-			AllowedCommands []string `yaml:"allowed_commands,omitempty"`
-			// Stored as a human-readable duration ("2m"); time.Duration
-			// would marshal as nanoseconds.
-			CommandTimeout string   `yaml:"command_timeout,omitempty"`
-			ReadDenylist   []string `yaml:"read_denylist,omitempty"`
-		} `yaml:"shell"`
-		LitertLM struct {
-			Backend string `yaml:"backend"`
-		} `yaml:"litertlm"`
-		Tools    map[string]bool   `yaml:"tools,omitempty"`
-		Commands map[string]string `yaml:"commands,omitempty"`
-	}{
-		LogLevel:   cfg.LogLevel,
-		Agent:      cfg.Agent,
-		AgentFiles: cfg.AgentFiles,
-		Skills:     cfg.Skills,
-		Tools:      cfg.Tools,
-		Commands:   cfg.Commands,
-	}
-	out.LLM.Provider = cfg.LLM.Provider
-	out.LLM.Model = cfg.LLM.Model
-	out.LLM.DecisionModel = cfg.LLM.DecisionModel
-	out.LLM.OCRModel = cfg.LLM.OCRModel
-	out.LLM.OCRMMProj = cfg.LLM.OCRMMProj
-	out.LLM.InputTypes = cfg.LLM.InputTypes
-	out.LLM.ThinkEffort = cfg.LLM.ThinkEffort
-	out.Shell.Confirm = cfg.Shell.Confirm
-	out.Shell.AllowedCommands = cfg.Shell.AllowedCommands
-	if cfg.Shell.CommandTimeout > 0 {
-		out.Shell.CommandTimeout = cfg.Shell.CommandTimeout.String()
-	}
-	out.Shell.ReadDenylist = cfg.Shell.ReadDenylist
-	out.LitertLM.Backend = cfg.LitertLM.Backend
-
-	data, err := yaml.Marshal(out)
+	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
