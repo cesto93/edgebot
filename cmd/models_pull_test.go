@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -232,4 +234,74 @@ func TestSelectRepoFiles(t *testing.T) {
 			t.Fatalf("err = %v, want %v", err, wantErr)
 		}
 	})
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestDownloadFileRejectsTruncatedBody(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	origBase, origClient := huggingFaceBaseURL, pullHTTPClient
+	t.Cleanup(func() {
+		huggingFaceBaseURL = origBase
+		pullHTTPClient = origClient
+	})
+	huggingFaceBaseURL = "https://example.invalid"
+	pullHTTPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			Status:        "200 OK",
+			ContentLength: 100,
+			Header:        make(http.Header),
+			Body:          io.NopCloser(strings.NewReader("short")),
+		}, nil
+	})}
+
+	err := downloadFile("owner/repo", "model.gguf")
+	if err == nil || !strings.Contains(err.Error(), "incomplete download") {
+		t.Fatalf("downloadFile() error = %v, want an incomplete-download error", err)
+	}
+
+	dest := filepath.Join(home, ".edgebot", "models", "llamacpp", "model.gguf")
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Fatalf("truncated file was not removed: stat err = %v", statErr)
+	}
+}
+
+func TestDownloadFileCompletesMatchingBody(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	origBase, origClient := huggingFaceBaseURL, pullHTTPClient
+	t.Cleanup(func() {
+		huggingFaceBaseURL = origBase
+		pullHTTPClient = origClient
+	})
+	huggingFaceBaseURL = "https://example.invalid"
+	pullHTTPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			Status:        "200 OK",
+			ContentLength: 5,
+			Header:        make(http.Header),
+			Body:          io.NopCloser(strings.NewReader("hello")),
+		}, nil
+	})}
+
+	if err := downloadFile("owner/repo", "model.gguf"); err != nil {
+		t.Fatalf("downloadFile() = %v", err)
+	}
+	dest := filepath.Join(home, ".edgebot", "models", "llamacpp", "model.gguf")
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read downloaded file: %v", err)
+	}
+	if string(got) != "hello" {
+		t.Errorf("file = %q, want %q", got, "hello")
+	}
 }

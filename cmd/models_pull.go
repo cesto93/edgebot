@@ -65,6 +65,9 @@ var (
 	fetchRepoFiles           = fetchHuggingFaceFiles
 	pullInput      io.Reader = os.Stdin
 	pullOutput     io.Writer = os.Stdout
+	// huggingFaceBaseURL and pullHTTPClient are swappable in tests.
+	huggingFaceBaseURL = "https://huggingface.co"
+	pullHTTPClient     = &http.Client{Timeout: 10 * time.Minute}
 )
 
 func runPull(repo string, filenames []string) error {
@@ -93,7 +96,7 @@ func runPull(repo string, filenames []string) error {
 		}
 		downloaded[i] = true
 	}
-	if downloaded[0] {
+	if len(downloaded) > 0 && downloaded[0] {
 		if err := updateConfig(filenames, downloaded); err != nil {
 			fmt.Printf("Warning: failed to update config: %v\n", err)
 		}
@@ -205,7 +208,7 @@ func promptRepoFile(in *bufio.Reader, out io.Writer, repo, kind string, options 
 
 // fetchHuggingFaceFiles lists the files in a HuggingFace repo via its tree API.
 func fetchHuggingFaceFiles(repo string) ([]repoFile, error) {
-	url := fmt.Sprintf("https://huggingface.co/api/models/%s/tree/main", repo)
+	url := fmt.Sprintf("%s/api/models/%s/tree/main", strings.TrimSuffix(huggingFaceBaseURL, "/"), repo)
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -335,7 +338,7 @@ func downloadFile(repo, filename string) error {
 		return fmt.Errorf("model file already exists at %s", destPath)
 	}
 
-	url := fmt.Sprintf("https://huggingface.co/%s/resolve/main/%s", repo, filename)
+	url := fmt.Sprintf("%s/%s/resolve/main/%s", strings.TrimSuffix(huggingFaceBaseURL, "/"), repo, filename)
 	fmt.Printf("Downloading %s ...\n", url)
 
 	out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
@@ -359,8 +362,7 @@ func downloadFile(repo, filename string) error {
 		cleanup()
 		return fmt.Errorf("failed to create request: %w", err)
 	}
-	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Do(req)
+	resp, err := pullHTTPClient.Do(req)
 	if err != nil {
 		cleanup()
 		return fmt.Errorf("download failed: %w", err)
@@ -401,6 +403,13 @@ func downloadFile(repo, filename string) error {
 			cleanup()
 			return fmt.Errorf("download error: %w", err)
 		}
+	}
+	// The body ended without an error: make sure it actually matched the
+	// advertised size. A dropped connection otherwise leaves a truncated
+	// model that would be registered in the config.
+	if contentLength > 0 && written != contentLength {
+		cleanup()
+		return fmt.Errorf("incomplete download: got %d of %d bytes", written, contentLength)
 	}
 	if err := out.Close(); err != nil {
 		cleanup()
