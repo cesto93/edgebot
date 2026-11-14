@@ -36,6 +36,7 @@ func TestLoadConfig(t *testing.T) {
 		wantConfirm   bool
 		wantAgent     string
 		wantTimeout   time.Duration
+		wantDenylist  []string
 	}{
 		{
 			name: "valid config file",
@@ -97,6 +98,21 @@ shell:
 			wantAgent:    "build",
 			wantTimeout:  5 * time.Minute,
 		},
+		{
+			name: "read denylist",
+			configContent: `
+shell:
+  read_denylist:
+    - ".env"
+    - "*.pem"
+`,
+			configExists: true,
+			wantModel:    "granite4:3b-h",
+			wantConfirm:  true,
+			wantAgent:    "build",
+			wantTimeout:  2 * time.Minute,
+			wantDenylist: []string{".env", "*.pem"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -129,6 +145,10 @@ shell:
 
 			if tt.wantTimeout != 0 && cfg.Shell.CommandTimeout != tt.wantTimeout {
 				t.Errorf("LoadConfig().Shell.CommandTimeout = %v, want %v", cfg.Shell.CommandTimeout, tt.wantTimeout)
+			}
+
+			if !slices.Equal(cfg.Shell.ReadDenylist, tt.wantDenylist) {
+				t.Errorf("LoadConfig().Shell.ReadDenylist = %v, want %v", cfg.Shell.ReadDenylist, tt.wantDenylist)
 			}
 		})
 	}
@@ -886,6 +906,7 @@ func TestSaveConfig(t *testing.T) {
 			Confirm         bool          `mapstructure:"confirm"`
 			AllowedCommands []string      `mapstructure:"allowed_commands"`
 			CommandTimeout  time.Duration `mapstructure:"command_timeout"`
+			ReadDenylist    []string      `mapstructure:"read_denylist"`
 		}{
 			Confirm:         true,
 			AllowedCommands: []string{"ls", "pwd"},

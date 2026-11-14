@@ -116,3 +116,26 @@ func TestServiceExecutorConfirmHelpers(t *testing.T) {
 		t.Error("AskConfirmation with confirm=false should always allow")
 	}
 }
+
+func TestServiceExecutorReadDenylist(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	if err := os.WriteFile(path, []byte("SECRET=1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	e := &ServiceExecutor{confirm: false, readDenylist: []string{".env"}}
+	out, err := e.ExecuteTool(context.Background(), llm.ToolCall{
+		Name:      "ReadFile",
+		Arguments: map[string]any{"path": path},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteTool() error = %v", err)
+	}
+	if !strings.Contains(out, "read_denylist") {
+		t.Errorf("output = %q, want a denylist error", out)
+	}
+	if strings.Contains(out, "SECRET") {
+		t.Error("denylisted content leaked into the output")
+	}
+}

@@ -22,9 +22,11 @@ type Server struct {
 	proto.UnimplementedAIServiceServer
 
 	// callLLM is swappable for tests.
-	callLLM  func(ctx context.Context, agent *llm.Agent, executor llm.ToolExecutor, messages []llm.Message) ([]llm.Message, error)
-	stop     chan struct{}
-	stopOnce sync.Once
+	callLLM func(ctx context.Context, agent *llm.Agent, executor llm.ToolExecutor, messages []llm.Message) ([]llm.Message, error)
+	// ReadDenylist is the shell.read_denylist applied to service-side reads.
+	ReadDenylist []string
+	stop         chan struct{}
+	stopOnce     sync.Once
 }
 
 // NewServer creates a Server that delegates LLM calls to the agent.
@@ -68,8 +70,9 @@ func (s *Server) Chat(ctx context.Context, req *proto.ChatRequest) (*proto.ChatR
 	}
 
 	executor := &ServiceExecutor{
-		confirm: req.Confirm,
-		allowed: req.AllowedCommands,
+		confirm:      req.Confirm,
+		allowed:      req.AllowedCommands,
+		readDenylist: s.ReadDenylist,
 	}
 
 	result, err := s.callLLM(ctx, agent, executor, messages)
@@ -158,12 +161,14 @@ func Serve(ctx context.Context, s *Server) error {
 // allowed commands and WriteFile is denied (there is no interactive
 // confirmation path); when confirm is false, everything runs automatically.
 type ServiceExecutor struct {
-	confirm bool
-	allowed []string
+	confirm      bool
+	allowed      []string
+	readDenylist []string
 }
 
 func (e *ServiceExecutor) ExecuteTool(ctx context.Context, call llm.ToolCall) (string, error) {
 	policy := llm.NewConfirmPolicy(e.confirm, e.allowed)
+	policy.ReadDenylist = e.readDenylist
 	return policy.ExecuteTool(ctx, call)
 }
 

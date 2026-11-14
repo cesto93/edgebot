@@ -60,6 +60,8 @@ type Config struct {
 		// CommandTimeout bounds a single RunCommand tool call (zero uses
 		// the 2m default). Stored as a duration string in YAML ("2m").
 		CommandTimeout time.Duration `mapstructure:"command_timeout"`
+		// ReadDenylist blocks ReadFile on matching paths (opt-in).
+		ReadDenylist []string `mapstructure:"read_denylist"`
 	} `mapstructure:"shell"`
 	LitertLM struct {
 		Backend string `mapstructure:"backend"`
@@ -196,6 +198,7 @@ func LoadConfig() (*Config, error) {
 					Confirm         bool          `mapstructure:"confirm"`
 					AllowedCommands []string      `mapstructure:"allowed_commands"`
 					CommandTimeout  time.Duration `mapstructure:"command_timeout"`
+					ReadDenylist    []string      `mapstructure:"read_denylist"`
 				}{
 					Confirm:         true,
 					AllowedCommands: []string{"ls", "pwd", "git"},
@@ -410,7 +413,8 @@ func SaveConfig(cfg *Config) error {
 			AllowedCommands []string `yaml:"allowed_commands,omitempty"`
 			// Stored as a human-readable duration ("2m"); time.Duration
 			// would marshal as nanoseconds.
-			CommandTimeout string `yaml:"command_timeout,omitempty"`
+			CommandTimeout string   `yaml:"command_timeout,omitempty"`
+			ReadDenylist   []string `yaml:"read_denylist,omitempty"`
 		} `yaml:"shell"`
 		LitertLM struct {
 			Backend string `yaml:"backend"`
@@ -437,6 +441,7 @@ func SaveConfig(cfg *Config) error {
 	if cfg.Shell.CommandTimeout > 0 {
 		out.Shell.CommandTimeout = cfg.Shell.CommandTimeout.String()
 	}
+	out.Shell.ReadDenylist = cfg.Shell.ReadDenylist
 	out.LitertLM.Backend = cfg.LitertLM.Backend
 
 	data, err := yaml.Marshal(out)

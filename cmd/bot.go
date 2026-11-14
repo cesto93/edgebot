@@ -329,6 +329,7 @@ type botExecutor struct {
 func (e *botExecutor) ExecuteTool(ctx context.Context, call llm.ToolCall) (string, error) {
 	policy := llm.NewConfirmPolicy(e.cfg.Shell.Confirm, e.cfg.Shell.AllowedCommands)
 	policy.CommandTimeout = e.cfg.Shell.CommandTimeout
+	policy.ReadDenylist = e.cfg.Shell.ReadDenylist
 	policy.OnExecute = func(call llm.ToolCall) {
 		slog.Info("bot tool execution", "tool", call.Name, "args", call.Arguments)
 	}

@@ -188,3 +188,53 @@ func TestWriteFilePreservesMode(t *testing.T) {
 		t.Errorf("content = %q, want new", data)
 	}
 }
+
+func TestReadFileCap(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "big.txt")
+	content := strings.Repeat("a", MaxReadFileBytes+1024)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	got, err := ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() = %v", err)
+	}
+	if !strings.Contains(got, "file truncated") {
+		t.Error("oversized read was not marked as truncated")
+	}
+	if len(got) > MaxReadFileBytes+200 {
+		t.Errorf("read length = %d, want at most %d plus marker", len(got), MaxReadFileBytes)
+	}
+}
+
+func TestIsReadDenied(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tests := []struct {
+		name     string
+		path     string
+		patterns []string
+		want     bool
+	}{
+		{name: "no patterns", path: "/tmp/anything", patterns: nil, want: false},
+		{name: "empty pattern", path: "/tmp/x", patterns: []string{"  "}, want: false},
+		{name: "exact base name", path: "/home/me/project/.env", patterns: []string{".env"}, want: true},
+		{name: "base glob", path: "/tmp/key.pem", patterns: []string{"*.pem"}, want: true},
+		{name: "base mismatch", path: "/tmp/key.pub", patterns: []string{"*.pem"}, want: false},
+		{name: "absolute pattern", path: "/etc/shadow", patterns: []string{"/etc/shadow"}, want: true},
+		{name: "absolute glob", path: "/etc/ssl/private/key.pem", patterns: []string{"/etc/ssl/**"}, want: false},
+		{name: "home expansion", path: filepath.Join(home, ".ssh", "id_ed25519"), patterns: []string{"~/.ssh/*"}, want: true},
+		{name: "home mismatch", path: filepath.Join(home, ".ssh", "known_hosts"), patterns: []string{"~/.ssh/*"}, want: true},
+		{name: "relative path resolves", path: "sub/.env", patterns: []string{".env"}, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsReadDenied(tt.path, tt.patterns); got != tt.want {
+				t.Errorf("IsReadDenied(%q, %v) = %v, want %v", tt.path, tt.patterns, got, tt.want)
+			}
+		})
+	}
+}

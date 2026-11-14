@@ -123,6 +123,7 @@ type ShellExecutorForLLM struct {
 func (e *ShellExecutorForLLM) ExecuteTool(ctx context.Context, call llm.ToolCall) (string, error) {
 	policy := &llm.ToolExecutorPolicy{
 		CommandTimeout: e.m.cfg.Shell.CommandTimeout,
+		ReadDenylist:   e.m.cfg.Shell.ReadDenylist,
 		ConfirmCommand: func(cmd string) bool {
 			if !e.m.cfg.Shell.Confirm {
 				return true

@@ -24,6 +24,8 @@ type ToolExecutorPolicy struct {
 	// CommandTimeout bounds a single RunCommand call. Zero uses
 	// tools.DefaultCommandTimeout.
 	CommandTimeout time.Duration
+	// ReadDenylist blocks ReadFile on matching paths (shell.read_denylist).
+	ReadDenylist []string
 }
 
 func (p *ToolExecutorPolicy) ExecuteTool(ctx context.Context, call ToolCall) (string, error) {
@@ -68,6 +70,9 @@ func (p *ToolExecutorPolicy) ExecuteTool(ctx context.Context, call ToolCall) (st
 			return "Error: Invalid tool arguments", nil
 		}
 		path = strings.TrimLeft(path, "@")
+		if tools.IsReadDenied(path, p.ReadDenylist) {
+			return fmt.Sprintf("Error: reading %s is blocked by shell.read_denylist", path), nil
+		}
 		p.exec(call)
 		return tools.ReadFile(path)
 

@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -98,5 +100,43 @@ func TestPolicyCommandCancellation(t *testing.T) {
 	}
 	if !strings.Contains(out, "cancelled") {
 		t.Errorf("output = %q, want a cancellation message", out)
+	}
+}
+
+func TestPolicyReadDenylist(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, ".env")
+	if err := os.WriteFile(secret, []byte("TOKEN=1"), 0o600); err != nil {
+		t.Fatalf("seed secret: %v", err)
+	}
+
+	policy := &ToolExecutorPolicy{ReadDenylist: []string{".env"}}
+	out, err := policy.ExecuteTool(context.Background(), ToolCall{
+		Name:      "ReadFile",
+		Arguments: map[string]any{"path": secret},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteTool() error = %v", err)
+	}
+	if !strings.Contains(out, "read_denylist") {
+		t.Errorf("output = %q, want a denylist error", out)
+	}
+	if strings.Contains(out, "TOKEN") {
+		t.Error("denylisted content leaked into the output")
+	}
+
+	allowed := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(allowed, []byte("hello"), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	out, err = policy.ExecuteTool(context.Background(), ToolCall{
+		Name:      "ReadFile",
+		Arguments: map[string]any{"path": allowed},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteTool() error = %v", err)
+	}
+	if out != "hello" {
+		t.Errorf("output = %q, want %q", out, "hello")
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,6 +17,10 @@ import (
 // DefaultCommandTimeout bounds a single RunCommand tool invocation when the
 // policy does not set an explicit timeout.
 const DefaultCommandTimeout = 2 * time.Minute
+
+// MaxReadFileBytes caps a single ReadFile result. Whole-file reads of large
+// logs or binaries otherwise land in the prompt (and in cloud requests).
+const MaxReadFileBytes = 256 << 10
 
 // MaxCommandOutputBytes caps the output returned to the model. Commands like
 // `cat huge.log` or `yes` otherwise flood the next request (or the local
@@ -118,5 +124,50 @@ func ReadFile(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
+	if len(content) > MaxReadFileBytes {
+		return string(content[:MaxReadFileBytes]) +
+			fmt.Sprintf("\n\n[... file truncated to %d bytes ...]", MaxReadFileBytes), nil
+	}
 	return string(content), nil
+}
+
+// IsReadDenied reports whether path matches any shell.read_denylist pattern.
+// Patterns follow filepath.Match: a pattern without a separator is matched
+// against the base name (".env", "*.pem"), one with a separator against the
+// absolute path ("~/.ssh/*"), and "~" expands to the home directory.
+func IsReadDenied(path string, patterns []string) bool {
+	if len(patterns) == 0 {
+		return false
+	}
+	abs, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		abs = filepath.Clean(path)
+	}
+	base := filepath.Base(abs)
+	home, _ := os.UserHomeDir()
+
+	for _, raw := range patterns {
+		pattern := strings.TrimSpace(raw)
+		if pattern == "" {
+			continue
+		}
+		if strings.HasPrefix(pattern, "~") && home != "" {
+			pattern = filepath.Join(home, strings.TrimPrefix(pattern, "~"))
+		}
+		pattern = filepath.Clean(pattern)
+
+		if strings.ContainsRune(pattern, filepath.Separator) {
+			if pattern == abs {
+				return true
+			}
+			if matched, _ := filepath.Match(pattern, abs); matched {
+				return true
+			}
+			continue
+		}
+		if matched, _ := filepath.Match(pattern, base); matched {
+			return true
+		}
+	}
+	return false
 }

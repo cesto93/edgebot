@@ -25,6 +25,7 @@ var configCmd = &cobra.Command{
   edgebot config --confirm=false
   edgebot config --allowed-commands "ls,pwd,git,curl"
   edgebot config --command-timeout 5m
+  edgebot config --read-denylist ".env,*.pem,~/.ssh/*"
   edgebot config --backend gpu
   edgebot config --think-effort low
   edgebot config --add-cmd "hello=say hello world"
@@ -130,6 +131,12 @@ var configCmd = &cobra.Command{
 			changed = true
 		}
 
+		if fl.Changed("read-denylist") {
+			v, _ := fl.GetStringSlice("read-denylist")
+			cfg.Shell.ReadDenylist = v
+			changed = true
+		}
+
 		if fl.Changed("command-timeout") {
 			v, _ := fl.GetDuration("command-timeout")
 			if v <= 0 {
@@ -225,6 +232,7 @@ func init() {
 	configCmd.Flags().Bool("confirm", false, "Require confirmation for tool execution")
 	configCmd.Flags().StringSlice("allowed-commands", nil, "Comma-separated list of commands that skip confirmation")
 	configCmd.Flags().Duration("command-timeout", 0, "Maximum runtime of a RunCommand call (e.g. 30s, 2m)")
+	configCmd.Flags().StringSlice("read-denylist", nil, "Comma-separated paths/globs that ReadFile must not read")
 	configCmd.Flags().String("backend", "", "LiteRT-LM inference backend (cpu, gpu)")
 	configCmd.Flags().String("think-effort", "", "Reasoning effort (none, minimal, low, medium, high, xhigh, max; empty = provider default)")
 	configCmd.Flags().String("enable-tool", "", "Enable a tool by name")

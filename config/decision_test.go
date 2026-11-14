@@ -176,6 +176,7 @@ func TestSaveConfigWritesDecisionModel(t *testing.T) {
 			Confirm         bool          `mapstructure:"confirm"`
 			AllowedCommands []string      `mapstructure:"allowed_commands"`
 			CommandTimeout  time.Duration `mapstructure:"command_timeout"`
+			ReadDenylist    []string      `mapstructure:"read_denylist"`
 		}{
 			Confirm:         true,
 			AllowedCommands: []string{"ls"},

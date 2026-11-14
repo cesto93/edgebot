@@ -60,7 +60,7 @@ func runService() error {
 		return stopService()
 	}
 
-	return startService()
+	return startService(cfg)
 }
 
 func socketSuffix() string {
@@ -89,7 +89,7 @@ func stopService() error {
 	return nil
 }
 
-func startService() error {
+func startService(cfg *config.Config) error {
 	path := service.SocketPath()
 	if path == "" {
 		return fmt.Errorf("cannot determine service socket path")
@@ -99,5 +99,7 @@ func startService() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return service.Serve(ctx, service.NewServer())
+	srv := service.NewServer()
+	srv.ReadDenylist = cfg.Shell.ReadDenylist
+	return service.Serve(ctx, srv)
 }
