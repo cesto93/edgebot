@@ -2,21 +2,38 @@ package llm
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"strings"
+	"time"
 )
+
+// openAIDefaultRequestTimeout matches the historical hardcoded client timeout.
+const openAIDefaultRequestTimeout = 60 * time.Second
 
 type ProviderConfig struct {
 	BaseURL string
 	APIKey  string
+	// Timeout bounds a single chat-completions request (LLM_TIMEOUT).
+	Timeout time.Duration
 }
 
 func getProviderConfig(provider string) ProviderConfig {
+	timeout := openAIDefaultRequestTimeout
+	if v := strings.TrimSpace(os.Getenv("LLM_TIMEOUT")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			timeout = d
+		} else {
+			slog.Warn("invalid LLM_TIMEOUT, using default", "value", v, "default", timeout)
+		}
+	}
+
 	switch provider {
 	case "gemini":
 		return ProviderConfig{
 			BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
 			APIKey:  os.Getenv("GEMINI_API_KEY"),
+			Timeout: timeout,
 		}
 	case "openrouter":
 		key := os.Getenv("OPENROUTER_API_KEY")
@@ -26,6 +43,7 @@ func getProviderConfig(provider string) ProviderConfig {
 		return ProviderConfig{
 			BaseURL: "https://openrouter.ai/api/v1",
 			APIKey:  key,
+			Timeout: timeout,
 		}
 	case "litertlm", "llamacpp":
 		return ProviderConfig{}
@@ -37,7 +55,7 @@ func getProviderConfig(provider string) ProviderConfig {
 		if !strings.HasSuffix(baseURL, "/v1") {
 			baseURL = strings.TrimSuffix(baseURL, "/") + "/v1"
 		}
-		return ProviderConfig{BaseURL: baseURL}
+		return ProviderConfig{BaseURL: baseURL, Timeout: timeout}
 	}
 }
 
@@ -67,8 +85,7 @@ func NewProviderCallerWithThink(provider, model string, executor ToolExecutor, t
 		applyThinkEffort(c, think)
 		return c
 	}
-	cfg := getProviderConfig(provider)
-	return NewOpenAICallerWithThink(cfg.BaseURL, cfg.APIKey, model, executor, think)
+	return newOpenAICallerFromProvider(provider, model, executor, think)
 }
 
 // NewProviderCallerRawWithThink is the RawCaller variant of
@@ -80,8 +97,18 @@ func NewProviderCallerRawWithThink(provider, model string, executor ToolExecutor
 			return rc
 		}
 	}
+	return newOpenAICallerFromProvider(provider, model, executor, think)
+}
+
+// newOpenAICallerFromProvider builds an HTTP caller using the provider's base
+// URL, key and configured request timeout.
+func newOpenAICallerFromProvider(provider, model string, executor ToolExecutor, think ThinkEffort) *OpenAICaller {
 	cfg := getProviderConfig(provider)
-	return NewOpenAICallerWithThink(cfg.BaseURL, cfg.APIKey, model, executor, think)
+	caller := NewOpenAICallerWithThink(cfg.BaseURL, cfg.APIKey, model, executor, think)
+	if cfg.Timeout > 0 {
+		caller.Client.Timeout = cfg.Timeout
+	}
+	return caller
 }
 
 // applyThinkEffort sets the think effort on in-process callers that support

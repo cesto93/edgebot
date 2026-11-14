@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,6 +70,17 @@ type OpenAIUsageCompletionDetails struct {
 }
 
 const openAIMaxToolHops = 10
+
+// Retry policy for transient provider failures. Three attempts total (the
+// first request plus two retries) with a short jittered backoff; a Retry-After
+// header wins when longer (capped so a hostile value cannot stall a session).
+const (
+	openAIMaxRetries      = 2
+	openAIMaxRetryDelay   = 30 * time.Second
+	openAIMaxErrorBodyLen = 1 << 10
+)
+
+var openAIRetryBaseDelay = 250 * time.Millisecond
 
 func NewOpenAICaller(baseURL, apiKey, model string, executor ToolExecutor) *OpenAICaller {
 	return NewOpenAICallerWithThink(baseURL, apiKey, model, executor, "")
@@ -227,7 +240,7 @@ func (o *OpenAICaller) call(ctx context.Context, systemPrompt string, messages [
 			req.Header.Set("Authorization", "Bearer "+o.APIKey)
 		}
 
-		resp, err := o.Client.Do(req)
+		resp, err := o.doWithRetry(req)
 		if err != nil {
 			return nil, fmt.Errorf("request failed: %w", err)
 		}
@@ -239,7 +252,7 @@ func (o *OpenAICaller) call(ctx context.Context, systemPrompt string, messages [
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+			return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, truncateErrorBody(body))
 		}
 
 		var openAIResp OpenAIResponse
@@ -311,4 +324,106 @@ func (o *OpenAICaller) call(ctx context.Context, systemPrompt string, messages [
 		}
 	}
 	return nil, fmt.Errorf("tool call hop limit exceeded (%d)", openAIMaxToolHops)
+}
+
+// doWithRetry retries transient failures (429 and 5xx) with jittered
+// backoff, honoring Retry-After. The final response (success, non-retryable
+// error, or last retryable status) is returned to the caller, which formats
+// the error with a bounded body.
+func (o *OpenAICaller) doWithRetry(req *http.Request) (*http.Response, error) {
+	ctx := req.Context()
+	for attempt := 0; ; attempt++ {
+		resp, err := o.Client.Do(req.Clone(ctx))
+		if err == nil && !retryableStatus(resp.StatusCode) {
+			return resp, nil
+		}
+		if err == nil && !canReplay(req) {
+			return resp, nil
+		}
+		if attempt >= openAIMaxRetries {
+			return resp, err
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, err
+			}
+		} else {
+			// Discard a bounded amount so the connection can be reused.
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, openAIMaxErrorBodyLen))
+			_ = resp.Body.Close()
+		}
+
+		delay := openAIRetryDelay(attempt)
+		if err == nil {
+			if ra := parseRetryAfter(resp.Header.Get("Retry-After")); ra > delay {
+				delay = ra
+			}
+		}
+		if delay > openAIMaxRetryDelay {
+			delay = openAIMaxRetryDelay
+		}
+		slog.Debug("retrying provider request", "attempt", attempt+1, "delay", delay, "err", err)
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+}
+
+func retryableStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// canReplay reports whether the request body can be sent again. Requests built
+// from bytes.Buffer/Reader get GetBody automatically; anything else is sent
+// once to avoid silently dropping the payload.
+func canReplay(req *http.Request) bool {
+	return req.Body == nil || req.Body == http.NoBody || req.GetBody != nil
+}
+
+func openAIRetryDelay(attempt int) time.Duration {
+	base := openAIRetryBaseDelay * time.Duration(1<<attempt)
+	if base <= 0 {
+		return 0
+	}
+	// +/-25% jitter so parallel sessions do not retry in lockstep.
+	delta := base / 4
+	if delta <= 0 {
+		return base
+	}
+	return base - delta + time.Duration(rand.Int64N(int64(2*delta)+1))
+}
+
+func parseRetryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+func truncateErrorBody(body []byte) string {
+	s := strings.TrimSpace(string(body))
+	if len(s) <= openAIMaxErrorBodyLen {
+		return s
+	}
+	return s[:openAIMaxErrorBodyLen] + "... [truncated]"
 }

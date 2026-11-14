@@ -3,9 +3,12 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewOpenAICaller(t *testing.T) {
@@ -300,5 +303,96 @@ func TestGeminiSecondHopReplaysSignature(t *testing.T) {
 	if !found {
 		t.Errorf("second hop replayed messages lack thought_signature SIG_A: %+v",
 			secondHop.Messages)
+	}
+}
+
+func TestOpenAIRetriesTransientFailures(t *testing.T) {
+	orig := openAIRetryBaseDelay
+	openAIRetryBaseDelay = time.Millisecond
+	t.Cleanup(func() { openAIRetryBaseDelay = orig })
+
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 3 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte("slow down"))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+
+	caller := NewOpenAICaller(srv.URL, "", "m", NoopExecutor{})
+	msgs, err := caller.Call(context.Background(), "sys", []Message{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("Call() = %v", err)
+	}
+	if attempts != 3 {
+		t.Errorf("attempts = %d, want 3 (two retries)", attempts)
+	}
+	if len(msgs) == 0 || msgs[len(msgs)-1].Content != "ok" {
+		t.Errorf("messages = %+v, want final content %q", msgs, "ok")
+	}
+}
+
+func TestOpenAINoRetryOnClientError(t *testing.T) {
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(strings.Repeat("x", 5000)))
+	}))
+	defer srv.Close()
+
+	caller := NewOpenAICaller(srv.URL, "", "m", NoopExecutor{})
+	_, err := caller.Call(context.Background(), "sys", []Message{{Role: "user", Content: "hi"}}, nil)
+	if err == nil {
+		t.Fatal("Call() = nil error, want API error")
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1 (4xx must not be retried)", attempts)
+	}
+	if len(err.Error()) > openAIMaxErrorBodyLen+200 {
+		t.Errorf("error message is not bounded: %d bytes", len(err.Error()))
+	}
+}
+
+func TestOpenAICancelStopsRetries(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	caller := NewOpenAICaller("http://127.0.0.1:1", "", "m", NoopExecutor{})
+	_, err := caller.Call(ctx, "sys", []Message{{Role: "user", Content: "hi"}}, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Call() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	if got := parseRetryAfter("2"); got != 2*time.Second {
+		t.Errorf("parseRetryAfter(2) = %v, want 2s", got)
+	}
+	if got := parseRetryAfter(""); got != 0 {
+		t.Errorf("parseRetryAfter(empty) = %v, want 0", got)
+	}
+	if got := parseRetryAfter("not-a-date"); got != 0 {
+		t.Errorf("parseRetryAfter(invalid) = %v, want 0", got)
+	}
+}
+
+func TestOpenAIRetryDelayJitterRange(t *testing.T) {
+	orig := openAIRetryBaseDelay
+	openAIRetryBaseDelay = 100 * time.Millisecond
+	t.Cleanup(func() { openAIRetryBaseDelay = orig })
+
+	for attempt := 0; attempt < 3; attempt++ {
+		base := openAIRetryBaseDelay * time.Duration(1<<attempt)
+		for range 20 {
+			got := openAIRetryDelay(attempt)
+			if got < base*3/4 || got > base*5/4 {
+				t.Fatalf("openAIRetryDelay(%d) = %v, want between %v and %v", attempt, got, base*3/4, base*5/4)
+			}
+		}
 	}
 }

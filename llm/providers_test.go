@@ -3,6 +3,7 @@ package llm
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func TestGetProviderConfigGemini(t *testing.T) {
@@ -136,5 +137,17 @@ func TestNewProviderCallerOllama(t *testing.T) {
 	}
 	if oac.BaseURL != "http://localhost:11434/v1" {
 		t.Errorf("BaseURL = %q, want %q", oac.BaseURL, "http://localhost:11434/v1")
+	}
+}
+
+func TestGetProviderConfigTimeout(t *testing.T) {
+	t.Setenv("LLM_TIMEOUT", "30s")
+	if got := getProviderConfig("ollama").Timeout; got != 30*time.Second {
+		t.Errorf("Timeout = %v, want 30s", got)
+	}
+
+	t.Setenv("LLM_TIMEOUT", "not-a-duration")
+	if got := getProviderConfig("ollama").Timeout; got != openAIDefaultRequestTimeout {
+		t.Errorf("invalid LLM_TIMEOUT: Timeout = %v, want %v", got, openAIDefaultRequestTimeout)
 	}
 }
