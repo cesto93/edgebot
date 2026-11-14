@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	"edgebot/internal/atomicfile"
 )
 
 // DefaultCommandTimeout bounds a single RunCommand tool invocation when the
@@ -98,9 +100,14 @@ func ctxErrLabel(err error) string {
 	return "cancelled"
 }
 
+// WriteFile atomically replaces path, preserving the mode of an existing file
+// (new files get 0644).
 func WriteFile(path string, content string) (string, error) {
-	err := os.WriteFile(path, []byte(content), 0644)
-	if err != nil {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+		mode = info.Mode().Perm()
+	}
+	if err := atomicfile.Write(path, []byte(content), mode); err != nil {
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 	return fmt.Sprintf("File written successfully to %s", path), nil

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -160,5 +161,30 @@ func TestRunCommandOutputCap(t *testing.T) {
 	}
 	if len(out) > MaxCommandOutputBytes+200 {
 		t.Errorf("output length = %d, want at most cap (%d) plus marker", len(out), MaxCommandOutputBytes)
+	}
+}
+
+func TestWriteFilePreservesMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "script.sh")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	if _, err := WriteFile(path, "new"); err != nil {
+		t.Fatalf("WriteFile() = %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %o, want 600 preserved", info.Mode().Perm())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(data) != "new" {
+		t.Errorf("content = %q, want new", data)
 	}
 }

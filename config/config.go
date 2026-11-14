@@ -19,6 +19,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"edgebot/internal/atomicfile"
+
 	"github.com/ollama/ollama/api"
 	"github.com/spf13/viper"
 	"github.com/subosito/gotenv"
@@ -212,7 +214,7 @@ func LoadConfig() (*Config, error) {
 					defaultConfigFile := filepath.Join(configPath, "config.yaml")
 					if _, statErr := os.Stat(defaultConfigFile); os.IsNotExist(statErr) {
 						content := "log_level: \"info\"\nagent: \"build\"\nagent_files: true\nskills: true\nllm:\n  provider: \"ollama\"\n  model: \"granite4:3b-h\"\n  ocr_model: \"\"\n  input_types:\n    - \"text\"\nshell:\n  confirm: true\n  allowed_commands:\n    - \"ls\"\n    - \"pwd\"\n    - \"git\"\n  command_timeout: \"2m\"\nlitertlm:\n  backend: \"cpu\"\ntools:\n  RunCommand: true\n  WriteFile: true\n  ReadFile: true\n  KVSet: true\n  KVGet: true\n  KVList: true\n"
-						if writeErr := os.WriteFile(defaultConfigFile, []byte(content), 0o644); writeErr != nil {
+						if writeErr := atomicfile.Write(defaultConfigFile, []byte(content), 0o644); writeErr != nil {
 							slog.Warn("failed to write default config", "err", writeErr)
 						} else {
 							defaultConfig.ConfigFile = defaultConfigFile
@@ -442,7 +444,7 @@ func SaveConfig(cfg *Config) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(configFile, data, 0644); err != nil {
+	if err := atomicfile.Write(configFile, data, 0o644); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
