@@ -33,7 +33,7 @@ func commitCallLLM(cfg *config.Config, systemPrompt string, messages []llm.Messa
 		Confirm:         cfg.Shell.Confirm,
 		AllowedCommands: append([]string(nil), cfg.Shell.AllowedCommands...),
 	}
-	return chatWithServiceFallback(req, nil, func() ([]llm.Message, error) {
+	return chatWithServiceFallback(context.Background(), req, nil, func() ([]llm.Message, error) {
 		caller := llm.NewProviderCaller(cfg.LLM.Provider, cfg.LLM.Model, llm.NoopExecutor{})
 		if lc, ok := caller.(*llm.LitertLMCaller); ok {
 			lc.Backend = cfg.LitertLM.Backend

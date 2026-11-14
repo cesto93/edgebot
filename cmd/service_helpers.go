@@ -33,12 +33,13 @@ func chatRequestFromConfig(cfg *config.Config, messages []llm.Message) service.C
 // chatWithServiceFallback routes a chat request through the running service
 // when active, falling back to local execution when the service is
 // unreachable. wrap, if non-nil, is applied to service-originated errors that
-// are not ErrUnavailable.
-func chatWithServiceFallback(req service.ChatRequest, wrap func(error) error, local func() ([]llm.Message, error)) ([]llm.Message, error) {
+// are not ErrUnavailable. ctx bounds the request, so caller cancellation
+// propagates to the service instead of being masked by a background context.
+func chatWithServiceFallback(ctx context.Context, req service.ChatRequest, wrap func(error) error, local func() ([]llm.Message, error)) ([]llm.Message, error) {
 	if !service.IsActive() {
 		return local()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, err := service.Chat(ctx, req)
 	if err == nil {

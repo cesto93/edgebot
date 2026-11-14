@@ -9,7 +9,9 @@ import (
 	"edgebot/service/proto"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // ErrUnavailable is returned when the service cannot be reached. Sessions use
@@ -98,12 +100,30 @@ func (c *Client) Ping(ctx context.Context) (*proto.PingResponse, error) {
 func (c *Client) Chat(ctx context.Context, req ChatRequest) ([]llm.Message, error) {
 	resp, err := c.svc.Chat(ctx, toProtoRequest(req))
 	if err != nil {
-		return nil, ErrUnavailable
+		return nil, classifyChatError(ctx, err)
 	}
 	if resp.Error != "" {
 		return nil, errors.New(resp.Error)
 	}
 	return messagesFromProto(resp.Messages), nil
+}
+
+// classifyChatError maps a gRPC failure to an error callers can act on.
+// Only connectivity failures are reported as ErrUnavailable (which triggers
+// the local fallback): a cancelled or timed-out request must surface as
+// context.Canceled/context.DeadlineExceeded so callers do not silently start
+// a duplicate local run, and application-level failures must stay visible
+// instead of being mistaken for a missing service.
+func classifyChatError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	switch status.Code(err) {
+	case codes.Unavailable:
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	default:
+		return err
+	}
 }
 
 // Stop asks the service to shut down gracefully.

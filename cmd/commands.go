@@ -178,7 +178,7 @@ func runStructuredCommand(cfg *config.Config, cmd *config.CommandInfo, args []st
 // when available, falling back to a local LLM call otherwise.
 func customCommandCallLLM(cfg *config.Config, messages []llm.Message) ([]llm.Message, error) {
 	req := chatRequestFromConfig(cfg, messages)
-	return chatWithServiceFallback(req, func(err error) error {
+	return chatWithServiceFallback(context.Background(), req, func(err error) error {
 		return fmt.Errorf("LLM call failed: %w", err)
 	}, func() ([]llm.Message, error) {
 		agent := llm.NewAgentForSession(cfg.Agent, cfg.LLM.Model, cfg.LLM.Provider, cfg.Tools, cfg.LitertLM.Backend, cfg.AgentFiles, cfg.Skills, llm.ThinkEffort(cfg.LLM.ThinkEffort))

@@ -1524,9 +1524,14 @@ func (m *ShellModel) ElaborateMessage() {
 	if m.serviceClient != nil || service.IsActive() {
 		resultMessages, err := m.serviceChat(ctx, commonMessages)
 		if err != nil {
-			if errors.Is(err, service.ErrUnavailable) {
+			switch {
+			case isRequestCancellation(err):
+				// The user cancelled; handleEscapeKey already reported it.
+				m.finishCancelled()
+				return
+			case errors.Is(err, service.ErrUnavailable):
 				slog.Debug("service unavailable, falling back to local execution", "err", err)
-			} else {
+			default:
 				m.failWithError(fmt.Sprintf("Error: %v", err))
 				return
 			}
@@ -1544,12 +1549,34 @@ func (m *ShellModel) ElaborateMessage() {
 	resultMessages, err := agent.CallLLM(ctx, executor, commonMessages)
 
 	if err != nil {
+		if isRequestCancellation(err) {
+			m.finishCancelled()
+			return
+		}
 		m.failWithError(fmt.Sprintf("Error: %v", err))
 		return
 	}
 
 	m.appendLLMResult(resultMessages)
 	m.finishSuccess()
+}
+
+// isRequestCancellation reports whether err is the result of the user
+// cancelling the current request (Esc / Ctrl+C). Cancellation is not a
+// failure: the transcript already shows "Request cancelled.".
+func isRequestCancellation(err error) bool {
+	return errors.Is(err, context.Canceled)
+}
+
+// finishCancelled clears the loading state after a cancellation without
+// appending an error bubble.
+func (m *ShellModel) finishCancelled() {
+	m.mu.Lock()
+	m.loading = false
+	m.mu.Unlock()
+	if m.teaProgram != nil {
+		m.teaProgram.Send(responseReadyMsg{})
+	}
 }
 
 func (m *ShellModel) failWithError(content string) {
@@ -1639,6 +1666,10 @@ func (m *ShellModel) runStructuredMessage(ctx context.Context, messages []llm.Me
 	}
 	resultMessages, err := caller.CallStructured(ctx, systemPrompt, messages, nil, responseFormat)
 	if err != nil {
+		if isRequestCancellation(err) {
+			m.finishCancelled()
+			return
+		}
 		safeAppendError(fmt.Sprintf("Error: LLM call failed: %v", err))
 		return
 	}

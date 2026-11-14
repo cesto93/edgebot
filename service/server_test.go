@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -247,7 +248,7 @@ func TestChatUnavailable(t *testing.T) {
 		Model:    "m",
 		Provider: "ollama",
 	})
-	if err != ErrUnavailable {
+	if !errors.Is(err, ErrUnavailable) {
 		t.Errorf("Chat err = %v, want ErrUnavailable", err)
 	}
 }
