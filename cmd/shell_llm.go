@@ -220,13 +220,6 @@ func (m *ShellModel) beginRequest() uint64 {
 	return m.reqSeq
 }
 
-// isCurrentRequest reports whether reqID is still the active request.
-func (m *ShellModel) isCurrentRequest(reqID uint64) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.reqSeq == reqID
-}
-
 // isRequestCancellation reports whether err is the result of the user
 // cancelling the current request (Esc / Ctrl+C). Cancellation is not a
 // failure: the transcript already shows "Request cancelled.".
