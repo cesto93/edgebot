@@ -192,17 +192,30 @@ func (e *ShellExecutorForLLM) IsAllowedCommand(cmd string) bool {
 }
 
 func (e *ShellExecutorForLLM) AskConfirmation(cmd string) bool {
-	e.m.pendingCommand = cmd
-	e.m.waitingConfirm = true
-	if e.m.teaProgram != nil {
-		e.m.teaProgram.Send(confirmationMsg{cmd: cmd})
+	m := e.m
+	m.mu.Lock()
+	m.pendingCommand = cmd
+	m.waitingConfirm = true
+	cancelChan := m.cancelChan
+	m.mu.Unlock()
+
+	if m.teaProgram != nil {
+		m.teaProgram.Send(confirmationMsg{cmd: cmd})
+	}
+	if cancelChan == nil {
+		m.mu.Lock()
+		m.waitingConfirm = false
+		m.mu.Unlock()
+		return false
 	}
 
 	select {
-	case result := <-e.m.confirmationChan:
+	case result := <-m.confirmationChan:
 		return result
-	case <-e.m.cancelChan:
-		e.m.waitingConfirm = false
+	case <-cancelChan:
+		m.mu.Lock()
+		m.waitingConfirm = false
+		m.mu.Unlock()
 		return false
 	}
 }
@@ -249,6 +262,7 @@ type ShellModel struct {
 	selectedIndex      int
 	showSuggestions    bool
 	loading            bool
+	reqSeq             uint64
 	cancelChan         chan struct{}
 	cancelOnce         sync.Once
 	confirmationChan   chan bool
@@ -409,28 +423,25 @@ func (m *ShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *ShellModel) handleConfirmationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEnter, tea.KeyEscape:
+	answer := func(ok bool) (tea.Model, tea.Cmd) {
+		m.mu.Lock()
 		m.waitingConfirm = false
+		m.mu.Unlock()
 		select {
-		case m.confirmationChan <- false:
+		case m.confirmationChan <- ok:
 		default:
 		}
 		return m, nil
 	}
+	switch msg.Type {
+	case tea.KeyEnter, tea.KeyEscape:
+		return answer(false)
+	}
 	switch msg.String() {
 	case "y", "Y":
-		m.waitingConfirm = false
-		select {
-		case m.confirmationChan <- true:
-		default:
-		}
+		return answer(true)
 	case "n", "N":
-		m.waitingConfirm = false
-		select {
-		case m.confirmationChan <- false:
-		default:
-		}
+		return answer(false)
 	}
 	return m, nil
 }
@@ -460,14 +471,17 @@ func (m *ShellModel) handleEnterKey() (tea.Model, tea.Cmd) {
 }
 
 func (m *ShellModel) handleEscapeKey() (tea.Model, tea.Cmd) {
-	if m.loading {
+	m.mu.Lock()
+	loading := m.loading
+	if loading {
 		if m.cancelChan != nil {
 			m.cancelOnce.Do(func() { close(m.cancelChan) })
 		}
 		m.loading = false
-		m.mu.Lock()
 		m.messages = append(m.messages, Message{role: "system", content: "Request cancelled."})
-		m.mu.Unlock()
+	}
+	m.mu.Unlock()
+	if loading {
 		return m, nil
 	}
 	if m.menu.kind != menuNone {
@@ -731,13 +745,19 @@ func (m *ShellModel) renderFooter() string {
 		sb.WriteString("\n")
 	}
 
-	if m.waitingConfirm {
+	m.mu.Lock()
+	waitingConfirm := m.waitingConfirm
+	pendingCommand := m.pendingCommand
+	loading := m.loading
+	m.mu.Unlock()
+
+	if waitingConfirm {
 		sb.WriteString(systemStyle.Render(wrapShellText(
-			fmt.Sprintf("[LLM wants to execute: %s]", m.pendingCommand), m.viewWidth())))
+			fmt.Sprintf("[LLM wants to execute: %s]", pendingCommand), m.viewWidth())))
 		sb.WriteString("\n")
 		sb.WriteString(dimStyle.Render("Confirm execution? [y/N]"))
 		sb.WriteString("\n")
-	} else if m.loading {
+	} else if loading {
 		sb.WriteString(systemStyle.Render("Thinking... (Press Esc to cancel)"))
 		sb.WriteString("\n")
 	} else {
@@ -954,11 +974,8 @@ func (m *ShellModel) handleSubmit() (tea.Model, tea.Cmd) {
 	m.messages = append(m.messages, Message{role: "user", content: value, images: images})
 	m.mu.Unlock()
 
-	m.loading = true
-	m.cancelChan = make(chan struct{})
-	m.cancelOnce = sync.Once{}
-
-	go m.ElaborateMessage()
+	reqID := m.beginRequest()
+	go m.ElaborateMessage(reqID)
 
 	return m, nil
 }
@@ -1007,10 +1024,8 @@ func (m *ShellModel) handleCommand(input string) (tea.Model, tea.Cmd) {
 			m.mu.Lock()
 			m.messages = append(m.messages, Message{role: "user", content: text, images: images, schema: c.Schema})
 			m.mu.Unlock()
-			m.loading = true
-			m.cancelChan = make(chan struct{})
-			m.cancelOnce = sync.Once{}
-			go m.ElaborateMessage()
+			reqID := m.beginRequest()
+			go m.ElaborateMessage(reqID)
 			return m, nil
 		}
 	}
@@ -1474,11 +1489,13 @@ func (m *ShellModel) selectModel() {
 	m.menu.close()
 }
 
-func (m *ShellModel) ElaborateMessage() {
+func (m *ShellModel) ElaborateMessage(reqID uint64) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	m.mu.Lock()
 	cancelChan := m.cancelChan
+	m.mu.Unlock()
 	if cancelChan != nil {
 		go func() {
 			select {
@@ -1518,7 +1535,7 @@ func (m *ShellModel) ElaborateMessage() {
 	}
 
 	if structuredSchema != "" {
-		m.runStructuredMessage(ctx, commonMessages, structuredSchema)
+		m.runStructuredMessage(ctx, reqID, commonMessages, structuredSchema)
 		return
 	}
 
@@ -1528,17 +1545,17 @@ func (m *ShellModel) ElaborateMessage() {
 			switch {
 			case isRequestCancellation(err):
 				// The user cancelled; handleEscapeKey already reported it.
-				m.finishCancelled()
+				m.finishCancelled(reqID)
 				return
 			case errors.Is(err, service.ErrUnavailable):
 				slog.Debug("service unavailable, falling back to local execution", "err", err)
 			default:
-				m.failWithError(fmt.Sprintf("Error: %v", err))
+				m.failWithError(reqID, fmt.Sprintf("Error: %v", err))
 				return
 			}
 		} else {
 			m.appendLLMResult(resultMessages)
-			m.finishSuccess()
+			m.finishSuccess(reqID)
 			return
 		}
 	}
@@ -1551,15 +1568,35 @@ func (m *ShellModel) ElaborateMessage() {
 
 	if err != nil {
 		if isRequestCancellation(err) {
-			m.finishCancelled()
+			m.finishCancelled(reqID)
 			return
 		}
-		m.failWithError(fmt.Sprintf("Error: %v", err))
+		m.failWithError(reqID, fmt.Sprintf("Error: %v", err))
 		return
 	}
 
 	m.appendLLMResult(resultMessages)
-	m.finishSuccess()
+	m.finishSuccess(reqID)
+}
+
+// beginRequest allocates a new request id and marks the shell as loading.
+// Every request mutation is tagged with its id so a superseded goroutine can
+// no longer append results or clear the loading state of a newer request.
+func (m *ShellModel) beginRequest() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.loading = true
+	m.cancelChan = make(chan struct{})
+	m.cancelOnce = sync.Once{}
+	m.reqSeq++
+	return m.reqSeq
+}
+
+// isCurrentRequest reports whether reqID is still the active request.
+func (m *ShellModel) isCurrentRequest(reqID uint64) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.reqSeq == reqID
 }
 
 // isRequestCancellation reports whether err is the result of the user
@@ -1571,8 +1608,12 @@ func isRequestCancellation(err error) bool {
 
 // finishCancelled clears the loading state after a cancellation without
 // appending an error bubble.
-func (m *ShellModel) finishCancelled() {
+func (m *ShellModel) finishCancelled(reqID uint64) {
 	m.mu.Lock()
+	if m.reqSeq != reqID {
+		m.mu.Unlock()
+		return
+	}
 	m.loading = false
 	m.mu.Unlock()
 	if m.teaProgram != nil {
@@ -1580,8 +1621,12 @@ func (m *ShellModel) finishCancelled() {
 	}
 }
 
-func (m *ShellModel) failWithError(content string) {
+func (m *ShellModel) failWithError(reqID uint64, content string) {
 	m.mu.Lock()
+	if m.reqSeq != reqID {
+		m.mu.Unlock()
+		return
+	}
 	m.messages = append(m.messages, Message{role: "error", content: content})
 	m.loading = false
 	m.mu.Unlock()
@@ -1590,8 +1635,12 @@ func (m *ShellModel) failWithError(content string) {
 	}
 }
 
-func (m *ShellModel) finishSuccess() {
+func (m *ShellModel) finishSuccess(reqID uint64) {
 	m.mu.Lock()
+	if m.reqSeq != reqID {
+		m.mu.Unlock()
+		return
+	}
 	m.loading = false
 	m.mu.Unlock()
 	if m.teaProgram != nil {
@@ -1629,9 +1678,13 @@ func (m *ShellModel) serviceChat(ctx context.Context, messages []llm.Message) ([
 // runStructuredMessage executes a structured command (a command carrying a
 // JSON schema in its frontmatter) through CallStructured, bypassing the
 // service like extract did, and renders the JSON result.
-func (m *ShellModel) runStructuredMessage(ctx context.Context, messages []llm.Message, schemaPath string) {
+func (m *ShellModel) runStructuredMessage(ctx context.Context, reqID uint64, messages []llm.Message, schemaPath string) {
 	safeAppendError := func(text string) {
 		m.mu.Lock()
+		if m.reqSeq != reqID {
+			m.mu.Unlock()
+			return
+		}
 		m.messages = append(m.messages, Message{role: "error", content: text})
 		m.loading = false
 		m.mu.Unlock()
@@ -1668,7 +1721,7 @@ func (m *ShellModel) runStructuredMessage(ctx context.Context, messages []llm.Me
 	resultMessages, err := caller.CallStructured(ctx, systemPrompt, messages, nil, responseFormat)
 	if err != nil {
 		if isRequestCancellation(err) {
-			m.finishCancelled()
+			m.finishCancelled(reqID)
 			return
 		}
 		safeAppendError(fmt.Sprintf("Error: LLM call failed: %v", err))
@@ -1690,6 +1743,10 @@ func (m *ShellModel) runStructuredMessage(ctx context.Context, messages []llm.Me
 	result := prettyJSONOrRaw(stripThinkBlock(strings.TrimSpace(contentStr)))
 
 	m.mu.Lock()
+	if m.reqSeq != reqID {
+		m.mu.Unlock()
+		return
+	}
 	m.messages = append(m.messages, Message{role: "assistant", content: result})
 	m.loading = false
 	m.mu.Unlock()
