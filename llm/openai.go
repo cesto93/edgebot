@@ -291,7 +291,7 @@ func (o *OpenAICaller) call(ctx context.Context, systemPrompt string, messages [
 					Name:      tc.Function.Name,
 					Arguments: args,
 				}
-				output, err := o.Executor.ExecuteTool(call)
+				output, err := o.Executor.ExecuteTool(ctx, call)
 				if err != nil {
 					result = fmt.Sprintf("Error: %v\nOutput: %s", err, output)
 				} else {

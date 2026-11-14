@@ -162,9 +162,9 @@ type ServiceExecutor struct {
 	allowed []string
 }
 
-func (e *ServiceExecutor) ExecuteTool(call llm.ToolCall) (string, error) {
+func (e *ServiceExecutor) ExecuteTool(ctx context.Context, call llm.ToolCall) (string, error) {
 	policy := llm.NewConfirmPolicy(e.confirm, e.allowed)
-	return policy.ExecuteTool(call)
+	return policy.ExecuteTool(ctx, call)
 }
 
 func (e *ServiceExecutor) IsAllowedCommand(cmd string) bool {

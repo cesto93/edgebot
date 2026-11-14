@@ -53,6 +53,7 @@ func PrintConfig() {
 	fmt.Printf("Think Effort: %s%s%s\n", ColorGreen, thinkEffort, ColorReset)
 	fmt.Printf("Confirm Commands: %s%v%s\n", ColorGreen, cfg.Shell.Confirm, ColorReset)
 	fmt.Printf("Allowed Commands: %s%s%s\n", ColorGreen, strings.Join(cfg.Shell.AllowedCommands, ","), ColorReset)
+	fmt.Printf("Command Timeout: %s%v%s\n", ColorGreen, cfg.Shell.CommandTimeout, ColorReset)
 
 	if len(cfg.Tools) > 0 {
 		fmt.Printf("\n%sTools:%s\n", ColorBold+ColorCyan, ColorReset)

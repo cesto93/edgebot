@@ -171,7 +171,7 @@ func TestProviderCallerWithThinkPropagates(t *testing.T) {
 
 type mockExecutor struct{}
 
-func (m *mockExecutor) ExecuteTool(call ToolCall) (string, error) {
+func (m *mockExecutor) ExecuteTool(context.Context, ToolCall) (string, error) {
 	return "mock output", nil
 }
 

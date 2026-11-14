@@ -156,7 +156,7 @@ func (l *LitertLMCaller) dispatch(ctx context.Context, chat *litertlm.Chat, repl
 	for hops := 0; reply.HasToolCalls() && hops < litertlmMaxToolHops; hops++ {
 		calls := reply.ToolCalls()
 		for _, call := range calls {
-			result, toolErr := l.Executor.ExecuteTool(ToolCall{
+			result, toolErr := l.Executor.ExecuteTool(ctx, ToolCall{
 				Name:      call.Function.Name,
 				Arguments: call.Function.Arguments,
 			})

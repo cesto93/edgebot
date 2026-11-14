@@ -1,8 +1,10 @@
 package llm
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"edgebot/config"
 	"edgebot/tools"
@@ -19,9 +21,12 @@ type ToolExecutorPolicy struct {
 	// OnExecute is called immediately before a tool executes (used by the
 	// interactive shell to render its status messages).
 	OnExecute func(call ToolCall)
+	// CommandTimeout bounds a single RunCommand call. Zero uses
+	// tools.DefaultCommandTimeout.
+	CommandTimeout time.Duration
 }
 
-func (p *ToolExecutorPolicy) ExecuteTool(call ToolCall) (string, error) {
+func (p *ToolExecutorPolicy) ExecuteTool(ctx context.Context, call ToolCall) (string, error) {
 	switch call.Name {
 	case "RunCommand":
 		cmd, ok := call.Arguments["command"].(string)
@@ -32,7 +37,13 @@ func (p *ToolExecutorPolicy) ExecuteTool(call ToolCall) (string, error) {
 			return "Error: Command execution denied by user", nil
 		}
 		p.exec(call)
-		output, err := tools.RunCommand(cmd)
+		timeout := p.CommandTimeout
+		if timeout <= 0 {
+			timeout = tools.DefaultCommandTimeout
+		}
+		cmdCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		output, err := tools.RunCommandContext(cmdCtx, cmd)
 		if err != nil {
 			return fmt.Sprintf("Error: %v\nOutput: %s", err, output), nil
 		}
@@ -123,7 +134,7 @@ func NewConfirmPolicy(confirm bool, allowedCommands []string) *ToolExecutorPolic
 // NoopExecutor is a ToolExecutor that runs nothing and allows everything.
 type NoopExecutor struct{}
 
-func (NoopExecutor) ExecuteTool(call ToolCall) (string, error) {
+func (NoopExecutor) ExecuteTool(context.Context, ToolCall) (string, error) {
 	return "", nil
 }
 

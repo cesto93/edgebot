@@ -120,8 +120,9 @@ type ShellExecutorForLLM struct {
 	m *ShellModel
 }
 
-func (e *ShellExecutorForLLM) ExecuteTool(call llm.ToolCall) (string, error) {
+func (e *ShellExecutorForLLM) ExecuteTool(ctx context.Context, call llm.ToolCall) (string, error) {
 	policy := &llm.ToolExecutorPolicy{
+		CommandTimeout: e.m.cfg.Shell.CommandTimeout,
 		ConfirmCommand: func(cmd string) bool {
 			if !e.m.cfg.Shell.Confirm {
 				return true
@@ -143,7 +144,7 @@ func (e *ShellExecutorForLLM) ExecuteTool(call llm.ToolCall) (string, error) {
 			e.m.mu.Unlock()
 		},
 	}
-	return policy.ExecuteTool(call)
+	return policy.ExecuteTool(ctx, call)
 }
 
 // toolActionMessage renders the status line shown in the transcript before a

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,7 @@ import (
 func TestServiceExecutorConfirmTrue(t *testing.T) {
 	e := &ServiceExecutor{confirm: true, allowed: []string{"ls"}}
 
-	out, err := e.ExecuteTool(llm.ToolCall{Name: "RunCommand", Arguments: map[string]any{"command": "ls"}})
+	out, err := e.ExecuteTool(context.Background(), llm.ToolCall{Name: "RunCommand", Arguments: map[string]any{"command": "ls"}})
 	if err != nil {
 		t.Errorf("allowed command failed: %v", err)
 	}
@@ -20,12 +21,12 @@ func TestServiceExecutorConfirmTrue(t *testing.T) {
 		t.Errorf("allowed command was denied: %s", out)
 	}
 
-	out, _ = e.ExecuteTool(llm.ToolCall{Name: "RunCommand", Arguments: map[string]any{"command": "echo hi"}})
+	out, _ = e.ExecuteTool(context.Background(), llm.ToolCall{Name: "RunCommand", Arguments: map[string]any{"command": "echo hi"}})
 	if !strings.Contains(out, "denied") {
 		t.Errorf("non-allowed command not denied: %s", out)
 	}
 
-	out, _ = e.ExecuteTool(llm.ToolCall{
+	out, _ = e.ExecuteTool(context.Background(), llm.ToolCall{
 		Name: "WriteFile",
 		Arguments: map[string]any{
 			"path":    filepath.Join(t.TempDir(), "x.txt"),
@@ -40,7 +41,7 @@ func TestServiceExecutorConfirmTrue(t *testing.T) {
 func TestServiceExecutorConfirmFalse(t *testing.T) {
 	e := &ServiceExecutor{confirm: false}
 
-	out, err := e.ExecuteTool(llm.ToolCall{Name: "RunCommand", Arguments: map[string]any{"command": "echo hi"}})
+	out, err := e.ExecuteTool(context.Background(), llm.ToolCall{Name: "RunCommand", Arguments: map[string]any{"command": "echo hi"}})
 	if err != nil {
 		t.Errorf("RunCommand failed: %v", err)
 	}
@@ -50,7 +51,7 @@ func TestServiceExecutorConfirmFalse(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "written.txt")
-	out, _ = e.ExecuteTool(llm.ToolCall{
+	out, _ = e.ExecuteTool(context.Background(), llm.ToolCall{
 		Name: "WriteFile",
 		Arguments: map[string]any{
 			"path":    path,
@@ -73,7 +74,7 @@ func TestServiceExecutorReadFile(t *testing.T) {
 	}
 
 	e := &ServiceExecutor{confirm: true}
-	out, err := e.ExecuteTool(llm.ToolCall{Name: "ReadFile", Arguments: map[string]any{"path": path}})
+	out, err := e.ExecuteTool(context.Background(), llm.ToolCall{Name: "ReadFile", Arguments: map[string]any{"path": path}})
 	if err != nil {
 		t.Errorf("ReadFile failed: %v", err)
 	}
@@ -84,12 +85,12 @@ func TestServiceExecutorReadFile(t *testing.T) {
 
 func TestServiceExecutorInvalidArgs(t *testing.T) {
 	e := &ServiceExecutor{confirm: false}
-	out, _ := e.ExecuteTool(llm.ToolCall{Name: "RunCommand", Arguments: map[string]any{}})
+	out, _ := e.ExecuteTool(context.Background(), llm.ToolCall{Name: "RunCommand", Arguments: map[string]any{}})
 	if !strings.Contains(out, "Invalid") {
 		t.Errorf("invalid RunCommand args output = %q, want error message", out)
 	}
 
-	out, _ = e.ExecuteTool(llm.ToolCall{Name: "Nope", Arguments: map[string]any{}})
+	out, _ = e.ExecuteTool(context.Background(), llm.ToolCall{Name: "Nope", Arguments: map[string]any{}})
 	if !strings.Contains(out, "Unknown tool") {
 		t.Errorf("unknown tool output = %q, want error message", out)
 	}

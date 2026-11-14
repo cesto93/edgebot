@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -34,6 +35,7 @@ func TestLoadConfig(t *testing.T) {
 		wantModel     string
 		wantConfirm   bool
 		wantAgent     string
+		wantTimeout   time.Duration
 	}{
 		{
 			name: "valid config file",
@@ -47,6 +49,7 @@ shell:
 			wantModel:    "custom-model:latest",
 			wantConfirm:  false,
 			wantAgent:    "build",
+			wantTimeout:  2 * time.Minute,
 		},
 		{
 			name:          "default config when file not found",
@@ -55,6 +58,7 @@ shell:
 			wantModel:     "granite4:3b-h",
 			wantConfirm:   true,
 			wantAgent:     "build",
+			wantTimeout:   2 * time.Minute,
 		},
 		{
 			name: "partial config uses defaults",
@@ -66,6 +70,7 @@ llm:
 			wantModel:    "partial-model",
 			wantConfirm:  true,
 			wantAgent:    "build",
+			wantTimeout:  2 * time.Minute,
 		},
 		{
 			name: "custom agent",
@@ -78,6 +83,19 @@ llm:
 			wantModel:    "custom-model:latest",
 			wantConfirm:  true,
 			wantAgent:    "plan",
+			wantTimeout:  2 * time.Minute,
+		},
+		{
+			name: "custom command timeout",
+			configContent: `
+shell:
+  command_timeout: "5m"
+`,
+			configExists: true,
+			wantModel:    "granite4:3b-h",
+			wantConfirm:  true,
+			wantAgent:    "build",
+			wantTimeout:  5 * time.Minute,
 		},
 	}
 
@@ -107,6 +125,10 @@ llm:
 
 			if cfg.Agent != tt.wantAgent {
 				t.Errorf("LoadConfig().Agent = %q, want %q", cfg.Agent, tt.wantAgent)
+			}
+
+			if tt.wantTimeout != 0 && cfg.Shell.CommandTimeout != tt.wantTimeout {
+				t.Errorf("LoadConfig().Shell.CommandTimeout = %v, want %v", cfg.Shell.CommandTimeout, tt.wantTimeout)
 			}
 		})
 	}
@@ -861,8 +883,9 @@ func TestSaveConfig(t *testing.T) {
 			Model:    "test-model",
 		},
 		Shell: struct {
-			Confirm         bool     `mapstructure:"confirm"`
-			AllowedCommands []string `mapstructure:"allowed_commands"`
+			Confirm         bool          `mapstructure:"confirm"`
+			AllowedCommands []string      `mapstructure:"allowed_commands"`
+			CommandTimeout  time.Duration `mapstructure:"command_timeout"`
 		}{
 			Confirm:         true,
 			AllowedCommands: []string{"ls", "pwd"},

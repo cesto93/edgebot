@@ -315,12 +315,13 @@ type botExecutor struct {
 	cfg *config.Config
 }
 
-func (e *botExecutor) ExecuteTool(call llm.ToolCall) (string, error) {
+func (e *botExecutor) ExecuteTool(ctx context.Context, call llm.ToolCall) (string, error) {
 	policy := llm.NewConfirmPolicy(e.cfg.Shell.Confirm, e.cfg.Shell.AllowedCommands)
+	policy.CommandTimeout = e.cfg.Shell.CommandTimeout
 	policy.OnExecute = func(call llm.ToolCall) {
 		slog.Info("bot tool execution", "tool", call.Name, "args", call.Arguments)
 	}
-	return policy.ExecuteTool(call)
+	return policy.ExecuteTool(ctx, call)
 }
 
 func (e *botExecutor) IsAllowedCommand(cmd string) bool {

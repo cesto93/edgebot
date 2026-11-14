@@ -24,6 +24,7 @@ var configCmd = &cobra.Command{
   edgebot config --agent-files=false
   edgebot config --confirm=false
   edgebot config --allowed-commands "ls,pwd,git,curl"
+  edgebot config --command-timeout 5m
   edgebot config --backend gpu
   edgebot config --think-effort low
   edgebot config --add-cmd "hello=say hello world"
@@ -129,6 +130,15 @@ var configCmd = &cobra.Command{
 			changed = true
 		}
 
+		if fl.Changed("command-timeout") {
+			v, _ := fl.GetDuration("command-timeout")
+			if v <= 0 {
+				return fmt.Errorf("--command-timeout must be positive (e.g. 30s, 2m)")
+			}
+			cfg.Shell.CommandTimeout = v
+			changed = true
+		}
+
 		if fl.Changed("backend") {
 			v, _ := fl.GetString("backend")
 			cfg.LitertLM.Backend = v
@@ -214,6 +224,7 @@ func init() {
 	configCmd.Flags().String("log-level", "", "Set log level (debug, info, warn, error)")
 	configCmd.Flags().Bool("confirm", false, "Require confirmation for tool execution")
 	configCmd.Flags().StringSlice("allowed-commands", nil, "Comma-separated list of commands that skip confirmation")
+	configCmd.Flags().Duration("command-timeout", 0, "Maximum runtime of a RunCommand call (e.g. 30s, 2m)")
 	configCmd.Flags().String("backend", "", "LiteRT-LM inference backend (cpu, gpu)")
 	configCmd.Flags().String("think-effort", "", "Reasoning effort (none, minimal, low, medium, high, xhigh, max; empty = provider default)")
 	configCmd.Flags().String("enable-tool", "", "Enable a tool by name")

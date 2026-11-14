@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // mockDecisionDirs isolates home/config/routing from the real machine and
@@ -172,8 +173,9 @@ func TestSaveConfigWritesDecisionModel(t *testing.T) {
 			DecisionModel: "lev-1",
 		},
 		Shell: struct {
-			Confirm         bool     `mapstructure:"confirm"`
-			AllowedCommands []string `mapstructure:"allowed_commands"`
+			Confirm         bool          `mapstructure:"confirm"`
+			AllowedCommands []string      `mapstructure:"allowed_commands"`
+			CommandTimeout  time.Duration `mapstructure:"command_timeout"`
 		}{
 			Confirm:         true,
 			AllowedCommands: []string{"ls"},

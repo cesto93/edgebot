@@ -1,7 +1,10 @@
 package llm
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"edgebot/config"
 )
@@ -57,5 +60,43 @@ func TestConfirmPolicyDeniesWriteFile(t *testing.T) {
 	policy := NewConfirmPolicy(true, []string{"ls"})
 	if policy.ConfirmWriteFile("/tmp/x") {
 		t.Error("ConfirmWriteFile with confirm=true = true, want false")
+	}
+}
+
+// TestPolicyCommandTimeout ensures a hung tool call is bounded and the error
+// is reported back to the model as text instead of blocking the session.
+func TestPolicyCommandTimeout(t *testing.T) {
+	policy := &ToolExecutorPolicy{CommandTimeout: 100 * time.Millisecond}
+
+	start := time.Now()
+	out, err := policy.ExecuteTool(context.Background(), ToolCall{
+		Name:      "RunCommand",
+		Arguments: map[string]any{"command": "sleep 5"},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteTool() error = %v, want the failure in the output", err)
+	}
+	if !strings.Contains(out, "timed out") {
+		t.Errorf("output = %q, want a timeout message", out)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("ExecuteTool took %v, want the timeout to stop it promptly", elapsed)
+	}
+}
+
+func TestPolicyCommandCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	policy := NewConfirmPolicy(false, nil)
+	out, err := policy.ExecuteTool(ctx, ToolCall{
+		Name:      "RunCommand",
+		Arguments: map[string]any{"command": "sleep 5"},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteTool() error = %v", err)
+	}
+	if !strings.Contains(out, "cancelled") {
+		t.Errorf("output = %q, want a cancellation message", out)
 	}
 }

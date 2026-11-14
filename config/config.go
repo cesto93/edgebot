@@ -55,6 +55,9 @@ type Config struct {
 	Shell struct {
 		Confirm         bool     `mapstructure:"confirm"`
 		AllowedCommands []string `mapstructure:"allowed_commands"`
+		// CommandTimeout bounds a single RunCommand tool call (zero uses
+		// the 2m default). Stored as a duration string in YAML ("2m").
+		CommandTimeout time.Duration `mapstructure:"command_timeout"`
 	} `mapstructure:"shell"`
 	LitertLM struct {
 		Backend string `mapstructure:"backend"`
@@ -73,6 +76,9 @@ var loadEnvFunc = loadEnv
 
 // defaultTools is the default set of enabled tools, used when a config has no
 // tools map.
+// defaultCommandTimeout is the default bound for a single RunCommand call.
+const defaultCommandTimeout = 2 * time.Minute
+
 var defaultTools = map[string]bool{
 	"RunCommand": true,
 	"WriteFile":  true,
@@ -135,6 +141,7 @@ func LoadConfig() (*Config, error) {
 	v.SetDefault("llm.model", "granite4:3b-h")
 	v.SetDefault("shell.confirm", true)
 	v.SetDefault("shell.allowed_commands", []string{"ls", "pwd", "git"})
+	v.SetDefault("shell.command_timeout", defaultCommandTimeout)
 	v.SetDefault("log_level", "info")
 	v.SetDefault("agent", "build")
 	v.SetDefault("agent_files", true)
@@ -184,11 +191,13 @@ func LoadConfig() (*Config, error) {
 					InputTypes: []string{"text"},
 				},
 				Shell: struct {
-					Confirm         bool     `mapstructure:"confirm"`
-					AllowedCommands []string `mapstructure:"allowed_commands"`
+					Confirm         bool          `mapstructure:"confirm"`
+					AllowedCommands []string      `mapstructure:"allowed_commands"`
+					CommandTimeout  time.Duration `mapstructure:"command_timeout"`
 				}{
 					Confirm:         true,
 					AllowedCommands: []string{"ls", "pwd", "git"},
+					CommandTimeout:  defaultCommandTimeout,
 				},
 				LitertLM: struct {
 					Backend string `mapstructure:"backend"`
@@ -202,7 +211,7 @@ func LoadConfig() (*Config, error) {
 				if mkErr := os.MkdirAll(configPath, 0o755); mkErr == nil {
 					defaultConfigFile := filepath.Join(configPath, "config.yaml")
 					if _, statErr := os.Stat(defaultConfigFile); os.IsNotExist(statErr) {
-						content := "log_level: \"info\"\nagent: \"build\"\nagent_files: true\nskills: true\nllm:\n  provider: \"ollama\"\n  model: \"granite4:3b-h\"\n  ocr_model: \"\"\n  input_types:\n    - \"text\"\nshell:\n  confirm: true\n  allowed_commands:\n    - \"ls\"\n    - \"pwd\"\n    - \"git\"\nlitertlm:\n  backend: \"cpu\"\ntools:\n  RunCommand: true\n  WriteFile: true\n  ReadFile: true\n  KVSet: true\n  KVGet: true\n  KVList: true\n"
+						content := "log_level: \"info\"\nagent: \"build\"\nagent_files: true\nskills: true\nllm:\n  provider: \"ollama\"\n  model: \"granite4:3b-h\"\n  ocr_model: \"\"\n  input_types:\n    - \"text\"\nshell:\n  confirm: true\n  allowed_commands:\n    - \"ls\"\n    - \"pwd\"\n    - \"git\"\n  command_timeout: \"2m\"\nlitertlm:\n  backend: \"cpu\"\ntools:\n  RunCommand: true\n  WriteFile: true\n  ReadFile: true\n  KVSet: true\n  KVGet: true\n  KVList: true\n"
 						if writeErr := os.WriteFile(defaultConfigFile, []byte(content), 0o644); writeErr != nil {
 							slog.Warn("failed to write default config", "err", writeErr)
 						} else {
@@ -397,6 +406,9 @@ func SaveConfig(cfg *Config) error {
 		Shell struct {
 			Confirm         bool     `yaml:"confirm"`
 			AllowedCommands []string `yaml:"allowed_commands,omitempty"`
+			// Stored as a human-readable duration ("2m"); time.Duration
+			// would marshal as nanoseconds.
+			CommandTimeout string `yaml:"command_timeout,omitempty"`
 		} `yaml:"shell"`
 		LitertLM struct {
 			Backend string `yaml:"backend"`
@@ -420,6 +432,9 @@ func SaveConfig(cfg *Config) error {
 	out.LLM.ThinkEffort = cfg.LLM.ThinkEffort
 	out.Shell.Confirm = cfg.Shell.Confirm
 	out.Shell.AllowedCommands = cfg.Shell.AllowedCommands
+	if cfg.Shell.CommandTimeout > 0 {
+		out.Shell.CommandTimeout = cfg.Shell.CommandTimeout.String()
+	}
 	out.LitertLM.Backend = cfg.LitertLM.Backend
 
 	data, err := yaml.Marshal(out)

@@ -57,7 +57,7 @@ type ToolCall struct {
 }
 
 type ToolExecutor interface {
-	ExecuteTool(call ToolCall) (string, error)
+	ExecuteTool(ctx context.Context, call ToolCall) (string, error)
 	IsAllowedCommand(cmd string) bool
 	AskConfirmation(cmd string) bool
 }

@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunCommand(t *testing.T) {
@@ -114,4 +116,49 @@ func TestFileOperations(t *testing.T) {
 
 	// Cleanup
 	os.Remove(tempFile)
+}
+
+func TestRunCommandContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	_, err := RunCommandContext(ctx, "sleep 5")
+	if err == nil {
+		t.Fatal("RunCommandContext() = nil error, want cancellation error")
+	}
+	if !strings.Contains(err.Error(), "cancelled") {
+		t.Errorf("error = %v, want a cancellation message", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("cancelled command took %v, want it to stop promptly", elapsed)
+	}
+}
+
+func TestRunCommandContextTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err := RunCommandContext(ctx, "sleep 5")
+	if err == nil {
+		t.Fatal("RunCommandContext() = nil error, want timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("error = %v, want a timeout message", err)
+	}
+}
+
+func TestRunCommandOutputCap(t *testing.T) {
+	// Emit more than the cap; the writer must keep the first
+	// MaxCommandOutputBytes bytes and mark the truncation.
+	out, err := RunCommandContext(context.Background(), "yes x | head -c 300000")
+	if err != nil {
+		t.Fatalf("RunCommandContext() error = %v", err)
+	}
+	if !strings.Contains(out, "output truncated") {
+		t.Error("large output was not marked as truncated")
+	}
+	if len(out) > MaxCommandOutputBytes+200 {
+		t.Errorf("output length = %d, want at most cap (%d) plus marker", len(out), MaxCommandOutputBytes)
+	}
 }
