@@ -173,7 +173,7 @@ func (m *ShellModel) ElaborateMessage(reqID uint64) {
 			switch {
 			case isRequestCancellation(err):
 				// The user cancelled; handleEscapeKey already reported it.
-				m.finishCancelled(reqID)
+				m.finishRequest(reqID)
 				return
 			case errors.Is(err, service.ErrUnavailable):
 				slog.Debug("service unavailable, falling back to local execution", "err", err)
@@ -183,7 +183,7 @@ func (m *ShellModel) ElaborateMessage(reqID uint64) {
 			}
 		} else {
 			m.appendLLMResult(resultMessages)
-			m.finishSuccess(reqID)
+			m.finishRequest(reqID)
 			return
 		}
 	}
@@ -196,7 +196,7 @@ func (m *ShellModel) ElaborateMessage(reqID uint64) {
 
 	if err != nil {
 		if isRequestCancellation(err) {
-			m.finishCancelled(reqID)
+			m.finishRequest(reqID)
 			return
 		}
 		m.failWithError(reqID, fmt.Sprintf("Error: %v", err))
@@ -204,7 +204,7 @@ func (m *ShellModel) ElaborateMessage(reqID uint64) {
 	}
 
 	m.appendLLMResult(resultMessages)
-	m.finishSuccess(reqID)
+	m.finishRequest(reqID)
 }
 
 // beginRequest allocates a new request id and marks the shell as loading.
@@ -234,9 +234,11 @@ func isRequestCancellation(err error) bool {
 	return errors.Is(err, context.Canceled)
 }
 
-// finishCancelled clears the loading state after a cancellation without
-// appending an error bubble.
-func (m *ShellModel) finishCancelled(reqID uint64) {
+// finishRequest clears the loading state for a completed request. A
+// superseded request is a no-op so it cannot clear the loading state of the
+// request that replaced it. Cancellation and success share this path: the
+// cancellation bubble (if any) is appended by the caller.
+func (m *ShellModel) finishRequest(reqID uint64) {
 	m.mu.Lock()
 	if m.reqSeq != reqID {
 		m.mu.Unlock()
@@ -256,19 +258,6 @@ func (m *ShellModel) failWithError(reqID uint64, content string) {
 		return
 	}
 	m.messages = append(m.messages, Message{role: "error", content: content})
-	m.loading = false
-	m.mu.Unlock()
-	if m.teaProgram != nil {
-		m.teaProgram.Send(responseReadyMsg{})
-	}
-}
-
-func (m *ShellModel) finishSuccess(reqID uint64) {
-	m.mu.Lock()
-	if m.reqSeq != reqID {
-		m.mu.Unlock()
-		return
-	}
 	m.loading = false
 	m.mu.Unlock()
 	if m.teaProgram != nil {
@@ -349,7 +338,7 @@ func (m *ShellModel) runStructuredMessage(ctx context.Context, reqID uint64, mes
 	resultMessages, err := caller.CallStructured(ctx, systemPrompt, messages, nil, responseFormat)
 	if err != nil {
 		if isRequestCancellation(err) {
-			m.finishCancelled(reqID)
+			m.finishRequest(reqID)
 			return
 		}
 		safeAppendError(fmt.Sprintf("Error: LLM call failed: %v", err))

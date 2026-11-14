@@ -22,12 +22,12 @@ func TestSupersededRequestCannotMutateUI(t *testing.T) {
 		t.Fatal("stale request cleared the loading flag of the active request")
 	}
 
-	m.finishCancelled(first)
+	m.finishRequest(first)
 	if !m.loading {
 		t.Fatal("stale cancellation cleared the loading flag of the active request")
 	}
 
-	m.finishSuccess(second)
+	m.finishRequest(second)
 	if m.loading {
 		t.Fatal("active request did not clear the loading flag")
 	}
