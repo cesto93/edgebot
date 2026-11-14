@@ -276,10 +276,21 @@ func splitTelegramMessage(text string, limit int) []string {
 type botSession struct {
 	mu       sync.Mutex
 	messages map[int64][]llm.Message
+	// chatLocks serializes message handling per chat. Sharding keeps the
+	// lock table bounded; two chats occasionally sharing a stripe only
+	// delays one of them.
+	chatLocks [botChatLockStripes]sync.Mutex
 }
+
+const botChatLockStripes = 64
 
 func newBotSession() *botSession {
 	return &botSession{messages: make(map[int64][]llm.Message)}
+}
+
+// lockForChat returns the stripe mutex that serializes one chat's messages.
+func (s *botSession) lockForChat(chatID int64) *sync.Mutex {
+	return &s.chatLocks[uint64(chatID)%botChatLockStripes]
 }
 
 const botMaxHistory = 50
@@ -477,14 +488,24 @@ func runBot() error {
 			if text == "" {
 				continue
 			}
-			// handle per-message in goroutine to not block polling; limit concurrency
-			sem <- struct{}{}
-			go func(m *tgMessage) {
-				defer func() { <-sem }()
-				handleTelegramMessage(ctx, tg, cfg, sessions, m)
-			}(msg)
+			// Handle per-message in a goroutine to not block polling. The
+			// per-chat lock is taken before the global semaphore so a chat
+			// with queued messages cannot starve the other chats.
+			go dispatchTelegramMessage(ctx, tg, cfg, sessions, msg, sem)
 		}
 	}
+}
+
+// dispatchTelegramMessage serializes messages of the same chat, then runs
+// them under the global concurrency limit.
+func dispatchTelegramMessage(ctx context.Context, tg *telegramClient, cfg *config.Config, sessions *botSession, msg *tgMessage, sem chan struct{}) {
+	mu := sessions.lockForChat(msg.Chat.ID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	sem <- struct{}{}
+	defer func() { <-sem }()
+	handleTelegramMessage(ctx, tg, cfg, sessions, msg)
 }
 
 func handleTelegramMessage(ctx context.Context, tg *telegramClient, cfg *config.Config, sessions *botSession, msg *tgMessage) {
@@ -506,7 +527,7 @@ func handleTelegramMessage(ctx context.Context, tg *telegramClient, cfg *config.
 		}
 		return
 	}
-	if text == "/reset" || strings.HasPrefix(text, "/reset ") || text == "/clear" || strings.HasPrefix(text, "/clear ") {
+	if strings.HasPrefix(text, "/reset ") || strings.HasPrefix(text, "/clear ") {
 		sessions.reset(chatID)
 		if err := tg.sendMessage(ctx, chatID, "Conversation reset."); err != nil {
 			slog.Error("telegram sendMessage failed", "err", err, "chat_id", chatID)
@@ -514,7 +535,8 @@ func handleTelegramMessage(ctx context.Context, tg *telegramClient, cfg *config.
 		return
 	}
 
-	slog.Info("telegram message received", "chat_id", chatID, "text", text)
+	// Do not log message text at info level: it is private user content.
+	slog.Debug("telegram message received", "chat_id", chatID, "chars", len(text))
 
 	// indicate typing
 	typingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -567,28 +589,8 @@ func handleTelegramMessage(ctx context.Context, tg *telegramClient, cfg *config.
 	sessions.append(chatID, userMsg)
 	sessions.append(chatID, resultMessages...)
 
-	// extract final assistant text (last assistant message)
-	var reply string
-	for i := len(resultMessages) - 1; i >= 0; i-- {
-		if resultMessages[i].Role == "assistant" {
-			if s, ok := resultMessages[i].Content.(string); ok {
-				reply = s
-				break
-			}
-			reply = fmt.Sprintf("%v", resultMessages[i].Content)
-			break
-		}
-	}
-	if strings.TrimSpace(reply) == "" {
-		// fallback: last message content
-		last := resultMessages[len(resultMessages)-1]
-		if s, ok := last.Content.(string); ok {
-			reply = s
-		} else {
-			reply = fmt.Sprintf("%v", last.Content)
-		}
-	}
-	if strings.TrimSpace(reply) == "" {
+	reply := lastAssistantOrLastContent(resultMessages)
+	if reply == "" {
 		reply = "(empty response)"
 	}
 
