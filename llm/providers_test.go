@@ -151,3 +151,45 @@ func TestGetProviderConfigTimeout(t *testing.T) {
 		t.Errorf("invalid LLM_TIMEOUT: Timeout = %v, want %v", got, openAIDefaultRequestTimeout)
 	}
 }
+
+func TestNewProviderCallerSetsProviderIdentity(t *testing.T) {
+	for _, provider := range []string{"ollama", "gemini", "openrouter"} {
+		t.Run(provider, func(t *testing.T) {
+			caller, ok := NewProviderCaller(provider, "m", NoopExecutor{}).(*OpenAICaller)
+			if !ok {
+				t.Fatalf("caller type = %T, want *OpenAICaller", caller)
+			}
+			if caller.Provider != provider {
+				t.Errorf("Provider = %q, want %q", caller.Provider, provider)
+			}
+		})
+	}
+
+	raw, ok := NewProviderCallerRaw("openrouter", "m", NoopExecutor{}).(*OpenAICaller)
+	if !ok {
+		t.Fatalf("raw caller type = %T, want *OpenAICaller", raw)
+	}
+	if raw.Provider != "openrouter" {
+		t.Errorf("raw Provider = %q, want openrouter", raw.Provider)
+	}
+}
+
+func TestProviderIdentityOverridesURLSniffing(t *testing.T) {
+	caller := &OpenAICaller{BaseURL: "https://gateway.example/v1", Provider: "openrouter"}
+	if !caller.isOpenRouter() {
+		t.Error("openrouter provider behind a custom URL was not recognized")
+	}
+	if caller.providerName() != "openrouter" {
+		t.Errorf("providerName() = %q, want openrouter", caller.providerName())
+	}
+
+	caller.Provider = "gemini"
+	if !caller.isGemini() {
+		t.Error("gemini provider behind a custom URL was not recognized")
+	}
+
+	caller.Provider = "custom-gateway"
+	if caller.providerName() != "custom-gateway" {
+		t.Errorf("providerName() = %q, want custom-gateway", caller.providerName())
+	}
+}

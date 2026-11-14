@@ -17,9 +17,14 @@ import (
 )
 
 type OpenAICaller struct {
-	BaseURL  string
-	APIKey   string
-	Model    string
+	BaseURL string
+	APIKey  string
+	Model   string
+	// Provider is the configured provider id (ollama, gemini, openrouter,
+	// or a custom OpenAI-compatible endpoint). It drives provider-specific
+	// request fields and usage attribution; URL sniffing is only a fallback
+	// for callers constructed directly without a provider.
+	Provider string
 	Executor ToolExecutor
 	Client   *http.Client
 	// ThinkEffort is the unified reasoning-effort level ("": provider default).
@@ -116,14 +121,23 @@ func (o *OpenAICaller) reasoningFields() (*string, *OpenAIReasoning) {
 }
 
 func (o *OpenAICaller) isOpenRouter() bool {
+	if o.Provider != "" {
+		return o.Provider == "openrouter"
+	}
 	return strings.Contains(o.BaseURL, "openrouter.ai")
 }
 
 func (o *OpenAICaller) isGemini() bool {
+	if o.Provider != "" {
+		return o.Provider == "gemini"
+	}
 	return strings.Contains(o.BaseURL, "generativelanguage.googleapis.com")
 }
 
 func (o *OpenAICaller) providerName() string {
+	if o.Provider != "" {
+		return o.Provider
+	}
 	switch {
 	case o.isOpenRouter():
 		return "openrouter"

@@ -105,6 +105,10 @@ func NewProviderCallerRawWithThink(provider, model string, executor ToolExecutor
 func newOpenAICallerFromProvider(provider, model string, executor ToolExecutor, think ThinkEffort) *OpenAICaller {
 	cfg := getProviderConfig(provider)
 	caller := NewOpenAICallerWithThink(cfg.BaseURL, cfg.APIKey, model, executor, think)
+	caller.Provider = strings.ToLower(strings.TrimSpace(provider))
+	if caller.Provider == "" {
+		caller.Provider = "ollama"
+	}
 	if cfg.Timeout > 0 {
 		caller.Client.Timeout = cfg.Timeout
 	}
