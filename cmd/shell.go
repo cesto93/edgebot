@@ -153,6 +153,7 @@ type ShellModel struct {
 	menu               menuState
 	commands           []config.CommandInfo
 	serviceClient      *service.Client
+	transcript         transcriptCache
 	allowedCmdMode     struct {
 		active bool
 	}

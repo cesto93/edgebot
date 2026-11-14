@@ -181,6 +181,78 @@ func (m *ShellModel) renderTranscript(msgs []Message, w int) string {
 	return sb.String()
 }
 
+// transcriptCache memoizes the rendered transcript. Bubbletea calls View on
+// every message (keystrokes, ticks, async results), so re-wrapping and
+// re-styling the whole conversation on each keystroke is pure waste in long
+// sessions. The key covers everything renderTranscript reads.
+type transcriptCache struct {
+	valid         bool
+	msgCount      int
+	width         int
+	menuKind      menuKind
+	menuSelected  int
+	menuItems     string
+	showSuggests  bool
+	suggestions   string
+	suggestIndex  int
+	model         string
+	decisionModel string
+	agent         string
+	rendered      string
+}
+
+// transcriptBody returns the rendered transcript, reusing the previous render
+// when nothing visible changed.
+func (m *ShellModel) transcriptBody(msgs []Message, width int) string {
+	key := transcriptCache{
+		valid:        true,
+		msgCount:     len(msgs),
+		width:        width,
+		menuKind:     m.menu.kind,
+		menuSelected: m.menu.selectedIdx,
+		menuItems:    menuSignature(m.menu),
+		showSuggests: m.showSuggestions,
+		suggestions:  strings.Join(m.suggestions, "\x00"),
+		suggestIndex: m.selectedIndex,
+	}
+	if m.cfg != nil {
+		key.model = m.cfg.LLM.Model
+		key.decisionModel = m.cfg.LLM.DecisionModel
+		key.agent = m.cfg.Agent
+	}
+	c := &m.transcript
+	// The turn path is append-only, so any count change (including a
+	// reset-to-empty) invalidates the cache.
+	if c.valid && c.msgCount == key.msgCount &&
+		c.width == key.width && c.menuKind == key.menuKind &&
+		c.menuSelected == key.menuSelected && c.menuItems == key.menuItems &&
+		c.showSuggests == key.showSuggests && c.suggestions == key.suggestions &&
+		c.suggestIndex == key.suggestIndex && c.model == key.model &&
+		c.decisionModel == key.decisionModel && c.agent == key.agent {
+		return c.rendered
+	}
+
+	rendered := m.renderTranscript(msgs, width)
+	*c = key
+	c.rendered = rendered
+	return rendered
+}
+
+// menuSignature captures the variable menu contents (options/models) so the
+// transcript cache invalidates when a menu is rebuilt in place.
+func menuSignature(menu menuState) string {
+	var sb strings.Builder
+	for _, opt := range menu.options {
+		sb.WriteString(opt)
+		sb.WriteByte('\x00')
+	}
+	for _, model := range menu.models {
+		sb.WriteString(model.Name)
+		sb.WriteByte('\x00')
+	}
+	return sb.String()
+}
+
 // renderFooter builds the pinned bottom area: an optional scroll hint plus
 // the confirmation prompt, loading status or input line.
 func (m *ShellModel) renderFooter() string {
@@ -242,7 +314,7 @@ func (m *ShellModel) View() string {
 	m.mu.Unlock()
 
 	w := m.viewWidth()
-	body := m.renderTranscript(msgs, w)
+	body := m.transcriptBody(msgs, w)
 	footer := m.renderFooter()
 
 	if !m.ready || m.height <= 0 {
