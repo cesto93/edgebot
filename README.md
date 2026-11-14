@@ -14,7 +14,7 @@ An interactive shell powered by AI (**Ollama, Gemini, OpenRouter, LitertLM, Llam
 
 ## Prerequisites
 
-- **Go**: Version 1.25.5 or later.
+- **Go**: Version 1.27.0 or later.
 - **Providers**:
   - **Ollama**: Must be running locally (default, port 11434).
   - **Gemini**: Requires `GEMINI_API_KEY` environment variable.
@@ -35,10 +35,10 @@ cd edgebot
 # Build the binary
 make build
 
-# Or install it to your $GOPATH/bin (includes yzma libs)
+# Or install it to your $GOPATH/bin (the binary only; native libs are separate)
 make install
 
-# Install yzma CLI and llama.cpp libraries to ~/.edgebot/models/llamacpp/
+# Install the yzma CLI and llama.cpp libraries to ~/.edgebot/lib
 make install-yzma
 ```
 
@@ -67,6 +67,27 @@ Within the `edgebot >` prompt, you can use the following commands (with or witho
 - **Tab**: Trigger autocomplete for commands.
 - **Ctrl+C**: Stop the current operation or exit.
 - **Esc**: Cancel the current request or clear the input.
+
+### CLI Commands
+
+Besides the interactive shell, edgebot exposes one command per workflow:
+
+```bash
+edgebot commands [--run <name> [args...] [-o out.json]]
+edgebot commit [-A] [-d] [--decision-model <name>] [--no-filter]
+edgebot decide --request req.json | --state ... --choice|--score|--noul ...
+edgebot ocr <image|pdf>... [-m model] [--mmproj path] [--mode text|table|formula]
+edgebot models [--set <model>] [--delete <model>]
+edgebot models pull <repo> [model] [mmproj]
+edgebot models link <model> <mmproj>
+edgebot agents [--set <agent>]
+edgebot skills [--pull <git-url>]
+edgebot stats [--reset]
+edgebot context [--prompt] [--agents] [--skills]
+edgebot config [flags]
+edgebot service [--stop|--status]
+edgebot bot [--token <token>] [--allow-from <ids>]
+```
 
 ### Extract Structured Data
 
@@ -168,11 +189,18 @@ Default configuration:
 llm:
   provider: "ollama"
   model: "granite4:3b-h"
+  decision_model: ""       # optional, used by `edgebot decide`
   ocr_model: ""            # optional, used by `edgebot ocr`
   ocr_mmproj: ""           # optional OCR vision projector
+  think_effort: ""         # provider default; none/minimal/low/medium/high/xhigh/max
 shell:
   confirm: true
-  allowed_commands: "ls,pwd"
+  allowed_commands:
+    - "ls"
+    - "pwd"
+    - "git"
+  command_timeout: "2m"    # bound for a single RunCommand call
+  read_denylist: []        # opt-in paths/globs ReadFile must not read
 ```
 
 The provider/model can also be selected without editing `config.yaml` via
@@ -186,17 +214,23 @@ LITERTLM_BACKEND=cpu
 ```
 
 When only `LLM_MODEL` is set, the provider is auto-detected like
-`edgebot config --model` does.
+`edgebot config --model` does. `LLM_DECISION_MODEL`, `LLM_OCR_MODEL`,
+`LLM_OCR_MMPROJ` and `LLM_TIMEOUT` (per-request HTTP timeout, default `60s`)
+are also recognized.
 
 ### Configuration Options
 
 - **`llm.provider`**: The AI provider to use (`ollama`, `gemini`, `openrouter`, `litertlm` or `llamacpp`).
 - **`llm.model`**: The specific model name. For `litertlm`, this is a `.litertlm` filename without extension. For `llamacpp`, this is a GGUF filename (e.g., `granite4-3b-h.Q4_K_M.gguf`).
 - **`llm.ocr_model`**: The default OCR model used by `edgebot ocr`. OCR models are still multimodal (`TYPE=ocr`, input types `text,image`), detected from GGUF metadata or the model name.
-- **`llm.ocr_mmproj`**: Optional vision projector (mmproj) for the OCR model when the filename does not match the model.
+- **`llm.ocr_mmproj`**: Optional vision projector (mmproj) for the OCR model. When unset, the projector linked to the model in `mmproj.json` (written by `models pull`/`models link`) is used; projectors are never guessed from filenames.
+- **`llm.think_effort`**: Unified reasoning effort (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`); empty keeps the provider default.
 - **`litertlm.backend`**: The LiteRT-LM inference backend (`cpu` or `gpu`, default `cpu`).
 - **`shell.confirm`**: If `true`, the application will always ask for confirmation before executing an AI-suggested command.
-- **`shell.allowed_commands`**: A comma-separated list of safe commands that the AI can execute without requiring user confirmation (e.g., "ls,pwd,date").
+- **`shell.allowed_commands`**: The commands the AI may execute without confirmation (default `ls`, `pwd`, `git`). Compound commands are checked segment by segment, so `ls; rm -rf /` still prompts.
+- **`shell.command_timeout`**: Maximum runtime of a single `RunCommand` call (default `2m`); the whole process group is killed on timeout.
+- **`shell.read_denylist`**: Opt-in list of paths/globs `ReadFile` must refuse (e.g. `.env`, `*.pem`, `~/.ssh/*`). Off by default.
+- **`tools`**, **`agent`**, **`agent_files`**, **`skills`**: Per-tool toggles and the agent/context switches documented in `AGENTS.md`.
 
 ## LitertLM Provider
 
@@ -242,7 +276,7 @@ The `llamacpp` provider runs llama.cpp inference **in-process** using the [yzma]
    ```bash
    make install-yzma
    ```
-   This downloads the llama.cpp `.so` files to `~/.edgebot/models/llamacpp/`.
+   This installs the yzma CLI and downloads the llama.cpp `.so` files to `~/.edgebot/lib` (override with `YZMA_LIB` only if you move them).
 
 2. Place a GGUF model file in `~/.edgebot/models/llamacpp/`. For example:
    ```bash
@@ -262,7 +296,7 @@ The `llamacpp` provider runs llama.cpp inference **in-process** using the [yzma]
 
 Attach images with `@filepath` as usual. For image input to work the model must be a vision model and a matching vision projector (`mmproj`) GGUF must be available:
 
-1. Place the `mmproj` file next to your model in `~/.edgebot/models/llamacpp/`. It is auto-detected when its name contains `mmproj` (e.g. `mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf`) and is excluded from the model list.
+1. Place the `mmproj` file in `~/.edgebot/models/llamacpp/` and link it to the model: `edgebot models link <model> <mmproj>` (or pull both together with `edgebot models pull`, which records the link automatically). The link is stored in `~/.edgebot/models/llamacpp/mmproj.json`; filenames are never inspected, and `mmproj` files are excluded from the model list.
 
 2. Requires llama.cpp libraries ≥ b10273 (v1.23.0) — run `make install-yzma` again if you installed an older version.
 
@@ -312,7 +346,7 @@ When the LLM decides it needs to perform an action, it can use the following too
 - **`WriteFile`**: Writes content to a specified file.
 - **`KVSet`/`KVGet`/`KVList`**: Persistent key-value store (bbolt).
 
-Commands are executed via `bash -c`. For safety, execution of commands not in `allowed_commands` always requires explicit user confirmation (`y/N`).
+Commands are executed via `bash -c` under `shell.command_timeout`, with output capped at 100 KiB and `ReadFile` capped at 256 KiB so a single call cannot exhaust the model context. For safety, execution of commands not in `allowed_commands` always requires explicit user confirmation (`y/N`).
 
 ## License
 

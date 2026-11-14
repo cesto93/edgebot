@@ -49,7 +49,8 @@ type Config struct {
 		// unset; pull an OCR GGUF or set it via `edgebot config --ocr-model`.
 		OCRModel string `mapstructure:"ocr_model"`
 		// OCRMMProj is the optional vision projector (mmproj) for OCRModel.
-		// Empty = auto-resolve by model name, then a unique projector.
+		// Empty = the projector linked to the model in mmproj.json (written
+		// by `edgebot models pull` / `models link`).
 		OCRMMProj   string   `mapstructure:"ocr_mmproj"`
 		InputTypes  []string `mapstructure:"input_types"`
 		ThinkEffort string   `mapstructure:"think_effort"`
