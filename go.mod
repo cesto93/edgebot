@@ -6,13 +6,13 @@ require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
-	github.com/charmbracelet/x/ansi v0.11.9
-	github.com/hybridgroup/yzma v1.33.0
-	github.com/ollama/ollama v0.40.16
+	github.com/charmbracelet/x/ansi v0.12.0
+	github.com/hybridgroup/yzma v1.34.0
+	github.com/ollama/ollama v0.40.18
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/subosito/gotenv v1.6.0
-	github.com/vladimirvivien/litertlm-go v0.7.1
+	github.com/vladimirvivien/litertlm-go v0.8.1
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/term v0.48.0
 	google.golang.org/grpc v1.85.0
@@ -21,7 +21,7 @@ require (
 )
 
 require (
-	github.com/ardanlabs/jinja v1.12.0 // indirect
+	github.com/ardanlabs/jinja v1.14.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -57,9 +57,9 @@ require (
 	github.com/xo/terminfo v1.3.1 // indirect
 	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	golang.org/x/crypto v0.59.0 // indirect
-	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/net v0.63.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261123191846-1e707ab9fbc2 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
