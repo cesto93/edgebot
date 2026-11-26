@@ -238,11 +238,13 @@ The `litertlm` provider runs LiteRT-LM inference **in-process** using the [liter
 
 ### Setup
 
-1. Download the LiteRT-LM C API release and place it in `~/.edgebot/lib/`, then fetch the prebuilt aux/GPU libraries:
+1. Download and stage the LiteRT-LM runtime (C API 1.0.0, upstream v0.19.1):
    ```bash
    make install-litertlm
+   # or, equivalently:
+   edgebot litertlm install
    ```
-   This downloads the official `litert_lm_c_api` release from `google-ai-edge/LiteRT-LM`, extracts `lib/linux_x86_64/liblitert-lm.so`, renames it to `liblitertlm_c_cpu.so` (the filename the binding actually dlopens), and fetches the prebuilt aux/GPU libs into `~/.edgebot/lib/`. No symlink is needed.
+   This uses the same `libfetch` downloader as the [litertlm-go](https://github.com/vladimirvivien/litertlm-go) binding: it fetches the official `litert_lm_c_api-1.0.0.zip` release from `google-ai-edge/LiteRT-LM`, extracts the platform-specific unified `liblitert-lm.so` (or `.dylib`/`.dll`) into `~/.edgebot/lib/`, and reuses it on later runs. Pass `--force` to re-download or `--dir` to stage elsewhere (`$LITERTLM_LIB` is honoured). The C API 1.0.0 library bundles the former aux/GPU plugins, so no separate aux downloads are needed.
 
 2. Place a `.litertlm` model file in `~/.edgebot/models/litertlm/`. You can download one with `edgebot models pull`:
    ```bash

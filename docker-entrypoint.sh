@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # Edgebot docker entrypoint: assicura backend litertlm pronto all'uso.
-# - installa le shared lib LiteRT-LM in ~/.edgebot/lib se mancanti,
-#   vuote, corrotte o per l'arch sbagliata (via scripts/litertlm-libs.sh,
-#   la stessa logica del target `make install-litertlm`): la platform
-#   (linux_x86_64/linux_arm64) segue `uname -m`, ogni file scaricato e'
-#   verificato (non vuoto, dimensione minima, magic ELF, e_machine) prima
-#   di sostituire quello esistente
+# - installa la runtime LiteRT-LM in ~/.edgebot/lib se mancante tramite
+#   `edgebot litertlm install` (stesso downloader libfetch del binding
+#   litertlm-go: platform linux_x86_64/linux_arm64 dedotta dal binario,
+#   scrittura atomica, nessun curl/unzip richiesto)
 # - scarica il modello .litertlm da HuggingFace se mancante
 #   (via `edgebot models pull`, che aggiorna anche la config)
 #   (un fallimento non deve impedire di forzare la config al passo 3)
@@ -22,32 +20,11 @@ MODEL_FILE="${LITERTLM_MODEL_FILE:-gemma-4-E2B-it.litertlm}"
 MODEL_NAME="${MODEL_FILE%.litertlm}"
 BACKEND="${LITERTLM_BACKEND:-cpu}"
 
-# Shared LiteRT-LM download/verification helpers (platform selection, URLs,
-# install orchestration). In the image the library lives at
-# /usr/local/share/edgebot/litertlm-libs.sh (see Dockerfile); in a repo
-# checkout fall back to scripts/ next to this file (also covers sourcing
-# for tests).
-LITERTLM_LIBS_SH="${LITERTLM_LIBS_SH:-/usr/local/share/edgebot/litertlm-libs.sh}"
-if [ ! -f "$LITERTLM_LIBS_SH" ]; then
-  LITERTLM_LIBS_SH="$(dirname "${BASH_SOURCE[0]}")/scripts/litertlm-libs.sh"
-fi
-# shellcheck disable=SC1090
-source "$LITERTLM_LIBS_SH"
-
 main() {
   mkdir -p "$LIB_DIR" "$MODEL_DIR"
 
-  # 1. Shared libraries LiteRT-LM (serve liblitertlm_c_cpu.so + aux lib).
-  litertlm_ensure_libs "$LIB_DIR" || exit 1
-
-  # 1b. Fail fast when a required lib is still unusable (diagnostics inside).
-  litertlm_check_required "$LIB_DIR" || exit 1
-
-  # 1c. Fail fast when required libs have unresolvable system dependencies
-  # (e.g. libvulkan.so.1 from libvulkan1, missing on slim images): without
-  # this the bot would start and fail every LLM call at runtime with a
-  # cryptic dlopen error.
-  litertlm_check_system_deps "$LIB_DIR" || exit 1
+  # 1. Runtime LiteRT-LM (C API 1.0.0, unified liblitert-lm.so).
+  edgebot litertlm install --dir "$LIB_DIR" || exit 1
 
   # 2. Modello .litertlm: download solo se assente (un fallimento non deve
   # impedire di forzare la config di default al passo 3).

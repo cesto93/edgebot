@@ -29,28 +29,11 @@ func TestLitertLMClientMissingLib(t *testing.T) {
 	if err == nil {
 		t.Fatal("client() = nil error, want missing-library error")
 	}
-	if !strings.Contains(err.Error(), "required library") {
-		t.Errorf("client() error = %q, want missing-library error", err)
+	if !strings.Contains(err.Error(), "liblitert-lm.so") {
+		t.Errorf("client() error = %q, want it to name the missing unified library", err)
 	}
-	if !strings.Contains(err.Error(), "install-litertlm") {
+	if !strings.Contains(err.Error(), "edgebot litertlm install") {
 		t.Errorf("client() error = %q, want remediation hint", err)
-	}
-
-	// With the main lib present, the check must name the Gemma provider
-	// lib (the exact failure seen in the docker bot).
-	libDir := filepath.Join(home, ".edgebot", "lib")
-	if err := os.MkdirAll(libDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(libDir, "liblitertlm_c_cpu.so"), []byte("x"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	_, err = l.client(context.Background())
-	if err == nil {
-		t.Fatal("client() = nil error, want missing-library error")
-	}
-	if !strings.Contains(err.Error(), "libGemmaModelConstraintProvider.so") {
-		t.Errorf("client() error = %q, want it to name the missing library", err)
 	}
 }
 

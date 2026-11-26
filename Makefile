@@ -3,12 +3,13 @@ EDGEBOT_DIR := $(HOME)/.edgebot
 EDGEBOT_LIB := $(EDGEBOT_DIR)/lib
 # Yzma CLI version is taken from go.mod (keeps CLI and Go binding in sync).
 YZMA_VERSION ?= $(shell go list -m -f '{{.Version}}' github.com/hybridgroup/yzma 2>/dev/null)
-LITERTLM_TAG ?= main
-LITERTLM_VERSION ?= v0.16.0
+# LiteRT-LM C API 1.0.0 (unified liblitert-lm shared library). Keep in sync
+# with the litertlm-go binding, which requires upstream v0.19.1+.
+LITERTLM_VERSION ?= v0.19.1
 # LITERTLM_PLAT (linux_x86_64 | linux_arm64) defaults to the host arch inside
-# scripts/litertlm-libs.sh; override e.g. `make install-litertlm LITERTLM_PLAT=linux_arm64`.
-# (Wrong-arch .so files fail dlopen with a misleading "No such file or directory".)
+# `edgebot litertlm install`; override e.g. `make install-litertlm LITERTLM_PLAT=linux_arm64`.
 LITERTLM_PLAT ?=
+LITERTLM_BACKEND ?= cpu
 
 build:
 	go build -o edgebot .
@@ -28,10 +29,10 @@ install-yzma:
 	@echo "✓ yzma + llama.cpp libraries installed to $(EDGEBOT_LIB)"
 	@echo "  Set YZMA_LIB=$(EDGEBOT_LIB) in your shell rc file if needed."
 install-litertlm:
-	@LITERTLM_TAG="$(LITERTLM_TAG)" LITERTLM_VERSION="$(LITERTLM_VERSION)" LITERTLM_PLAT="$(LITERTLM_PLAT)" \
-		bash -c 'set -euo pipefail; source scripts/litertlm-libs.sh; litertlm_ensure_libs "$(EDGEBOT_LIB)"'
+	@LITERTLM_VERSION="$(LITERTLM_VERSION)" LITERTLM_PLAT="$(LITERTLM_PLAT)" LITERTLM_BACKEND="$(LITERTLM_BACKEND)" \
+		go run . litertlm install --dir "$(EDGEBOT_LIB)"
 	@echo ""
-	@echo "✓ LiteRT-LM libraries installed to $(EDGEBOT_LIB)"
+	@echo "✓ LiteRT-LM runtime installed to $(EDGEBOT_LIB)"
 	@echo "  Model files (.litertlm) go in $(EDGEBOT_DIR)/models/litertlm/"
 coverage:
 	go test -coverprofile=coverage.out ./...

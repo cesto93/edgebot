@@ -216,17 +216,11 @@ func (l *LitertLMCaller) client(ctx context.Context) (*litertlm.Client, error) {
 
 	// Pre-flight check so a missing runtime produces an actionable error
 	// instead of a cryptic dlopen failure (e.g. a stale ~/.edgebot/lib
-	// from an interrupted download inside docker).
-	mainLib := "liblitertlm_c_cpu.so"
-	if backend == "gpu" {
-		mainLib = "liblitertlm_c.so"
-	}
-	for _, name := range []string{mainLib, "libGemmaModelConstraintProvider.so"} {
-		p := filepath.Join(libDir, name)
-		st, err := os.Stat(p)
-		if err != nil || st.Size() == 0 {
-			return nil, fmt.Errorf("required library %s is missing or empty: run `make install-litertlm` (or restart the container so docker-entrypoint.sh re-downloads it)", p)
-		}
+	// from an interrupted download inside docker). LiteRT-LM C API 1.0.0
+	// ships one unified library that bundles the former aux/GPU plugins.
+	mainLib := filepath.Join(libDir, "liblitert-lm.so")
+	if st, err := os.Stat(mainLib); err != nil || st.Size() == 0 {
+		return nil, fmt.Errorf("required library %s is missing or empty: run `edgebot litertlm install` (or `make install-litertlm`; restarting the container re-runs the entrypoint)", mainLib)
 	}
 
 	key := libDir + "\x00" + modelPath + "\x00" + backend
@@ -247,10 +241,11 @@ func (l *LitertLMCaller) client(ctx context.Context) (*litertlm.Client, error) {
 		litertlm.WithBackend(backend),
 	)
 	if err != nil {
-		// The runtime links the Vulkan loader even for the cpu backend,
-		// so a minimal image without libvulkan1 surfaces as a cryptic
-		// dlopen error (seen on arm64 docker: "libvulkan.so.1: cannot
-		// open shared object file"). Point at the fix instead.
+		// The GPU backend needs the Vulkan loader (and some builds link
+		// it even for CPU), so a minimal image without libvulkan1
+		// surfaces as a cryptic dlopen error (seen on arm64 docker:
+		// "libvulkan.so.1: cannot open shared object file"). Point at
+		// the fix instead.
 		if strings.Contains(err.Error(), "libvulkan.so") {
 			return nil, fmt.Errorf("%w (missing system Vulkan loader: install libvulkan1 / rebuild the docker image)", err)
 		}
