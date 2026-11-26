@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Edgebot docker entrypoint: assicura backend litertlm pronto all'uso.
 # - installa la runtime LiteRT-LM in ~/.edgebot/lib se mancante tramite
-#   `edgebot litertlm install` (stesso downloader libfetch del binding
+#   `edgebot runtime install litertlm` (stesso downloader libfetch del binding
 #   litertlm-go: platform linux_x86_64/linux_arm64 dedotta dal binario,
 #   scrittura atomica, nessun curl/unzip richiesto)
 # - scarica il modello .litertlm da HuggingFace se mancante
@@ -24,7 +24,7 @@ main() {
   mkdir -p "$LIB_DIR" "$MODEL_DIR"
 
   # 1. Runtime LiteRT-LM (C API 1.0.0, unified liblitert-lm.so).
-  edgebot litertlm install --dir "$LIB_DIR" || exit 1
+  edgebot runtime install litertlm --dir "$LIB_DIR" || exit 1
 
   # 2. Modello .litertlm: download solo se assente (un fallimento non deve
   # impedire di forzare la config di default al passo 3).

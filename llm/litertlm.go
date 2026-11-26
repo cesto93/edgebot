@@ -220,7 +220,7 @@ func (l *LitertLMCaller) client(ctx context.Context) (*litertlm.Client, error) {
 	// ships one unified library that bundles the former aux/GPU plugins.
 	mainLib := filepath.Join(libDir, "liblitert-lm.so")
 	if st, err := os.Stat(mainLib); err != nil || st.Size() == 0 {
-		return nil, fmt.Errorf("required library %s is missing or empty: run `edgebot litertlm install` (or `make install-litertlm`; restarting the container re-runs the entrypoint)", mainLib)
+		return nil, fmt.Errorf("required library %s is missing or empty: run `edgebot runtime install litertlm` (restarting the container re-runs the entrypoint)", mainLib)
 	}
 
 	key := libDir + "\x00" + modelPath + "\x00" + backend

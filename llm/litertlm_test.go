@@ -32,7 +32,7 @@ func TestLitertLMClientMissingLib(t *testing.T) {
 	if !strings.Contains(err.Error(), "liblitert-lm.so") {
 		t.Errorf("client() error = %q, want it to name the missing unified library", err)
 	}
-	if !strings.Contains(err.Error(), "edgebot litertlm install") {
+	if !strings.Contains(err.Error(), "edgebot runtime install litertlm") {
 		t.Errorf("client() error = %q, want remediation hint", err)
 	}
 }

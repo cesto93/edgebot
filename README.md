@@ -38,8 +38,9 @@ make build
 # Or install it to your $GOPATH/bin (the binary only; native libs are separate)
 make install
 
-# Install the yzma CLI and llama.cpp libraries to ~/.edgebot/lib
-make install-yzma
+# Stage the native runtimes used by the in-process providers
+edgebot runtime install llamacpp   # or: edgebot runtime install litertlm
+edgebot runtime show               # list what is installed
 ```
 
 ## Usage
@@ -240,9 +241,7 @@ The `litertlm` provider runs LiteRT-LM inference **in-process** using the [liter
 
 1. Download and stage the LiteRT-LM runtime (C API 1.0.0, upstream v0.19.1):
    ```bash
-   make install-litertlm
-   # or, equivalently:
-   edgebot litertlm install
+   edgebot runtime install litertlm
    ```
    This uses the same `libfetch` downloader as the [litertlm-go](https://github.com/vladimirvivien/litertlm-go) binding: it fetches the official `litert_lm_c_api-1.0.0.zip` release from `google-ai-edge/LiteRT-LM`, extracts the platform-specific unified `liblitert-lm.so` (or `.dylib`/`.dll`) into `~/.edgebot/lib/`, and reuses it on later runs. Pass `--force` to re-download or `--dir` to stage elsewhere (`$LITERTLM_LIB` is honoured). The C API 1.0.0 library bundles the former aux/GPU plugins, so no separate aux downloads are needed.
 
@@ -274,11 +273,11 @@ The `llamacpp` provider runs llama.cpp inference **in-process** using the [yzma]
 
 ### Setup
 
-1. Install yzma and the llama.cpp shared libraries:
+1. Stage the llama.cpp shared libraries:
    ```bash
-   make install-yzma
+   edgebot runtime install llamacpp
    ```
-   This installs the yzma CLI and downloads the llama.cpp `.so` files to `~/.edgebot/lib` (override with `YZMA_LIB` only if you move them).
+   This delegates to the [yzma](https://github.com/hybridgroup/yzma) CLI, which downloads the llama.cpp release pinned by the binding into `~/.edgebot/lib` and picks the CUDA build when `nvidia-smi` is available, then ROCm, then CPU (`--processor` overrides). If `yzma` is not on `PATH`, edgebot builds the matching CLI version into a temporary directory first. `edgebot runtime show` reports the installed runtime and `--force` re-downloads it.
 
 2. Place a GGUF model file in `~/.edgebot/models/llamacpp/`. For example:
    ```bash
@@ -300,7 +299,7 @@ Attach images with `@filepath` as usual. For image input to work the model must 
 
 1. Place the `mmproj` file in `~/.edgebot/models/llamacpp/` and link it to the model: `edgebot models link <model> <mmproj>` (or pull both together with `edgebot models pull`, which records the link automatically). The link is stored in `~/.edgebot/models/llamacpp/mmproj.json`; filenames are never inspected, and `mmproj` files are excluded from the model list.
 
-2. Requires llama.cpp libraries ≥ b10273 (v1.23.0) — run `make install-yzma` again if you installed an older version.
+2. Requires llama.cpp libraries ≥ b10273 (v1.23.0) — run `edgebot runtime install llamacpp --force` again if you installed an older version.
 
 Vision models with matching GGUFs include moondream2 and Qwen2.5-VL. Without a projector, image requests return a clear error while text-only inference keeps working.
 

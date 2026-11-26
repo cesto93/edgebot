@@ -19,7 +19,7 @@ var rootCmd = &cobra.Command{
   edgebot config
   edgebot commit
   edgebot models
-  edgebot litertlm install
+  edgebot runtime install litertlm
   edgebot ocr document.pdf
   edgebot commands --run extract invoice.pdf`,
 	Run: func(cmd *cobra.Command, args []string) {
